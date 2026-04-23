@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { ImagePlus, Grid, List, RefreshCw } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ImagePlus, Grid, List, RefreshCw, Loader2, X } from 'lucide-react';
+import { editImage, generateImage, getHistory, getInspirations, HistoryItem, InspirationItem } from '../api';
 
 const mockFeed = [
   {
@@ -36,6 +37,58 @@ const mockFeed = [
 
 export default function Home() {
   const [promptValue, setPromptValue] = useState('');
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [inspirations, setInspirations] = useState<InspirationItem[]>([]);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    Promise.all([getHistory({ limit: 12 }), getInspirations({ limit: 60 })])
+      .then(([historyData, inspirationData]) => {
+        setHistory(historyData.items.filter((item) => item.status === 'succeeded' && Boolean(item.image_url)));
+        setInspirations(inspirationData.items);
+      })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  async function handleExecute() {
+    const prompt = promptValue.trim();
+    if (!prompt || loading) return;
+    setLoading(true);
+    setError('');
+    setMessage(selectedFile ? 'EDIT REQUEST DISPATCHED' : 'GENERATION REQUEST DISPATCHED');
+    try {
+      const response = selectedFile
+        ? await editImage({ prompt }, selectedFile)
+        : await generateImage({ prompt });
+      setHistory((items) => [...response.items, ...items]);
+      setSelectedFile(null);
+      setMessage('RESULT STORED IN ARCHIVE');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setMessage('');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const generatedFeed = history.map((item) => ({
+        id: `ID:${item.id.slice(0, 4).toUpperCase()}`,
+        img: item.image_url || '',
+        prompt: item.prompt,
+        title: item.mode.toUpperCase(),
+      }));
+  const inspirationFeed = inspirations.map((item) => ({
+    id: item.author || item.section,
+    img: item.image_url || '',
+    prompt: item.prompt,
+    title: item.title,
+  }));
+  const feed = [...generatedFeed, ...inspirationFeed].filter((item) => item.img) || mockFeed;
+  const visibleFeed = feed.length ? feed : mockFeed;
 
   return (
     <div className="pt-24 pb-48 px-6 max-w-[1440px] mx-auto min-h-screen bg-[radial-gradient(ellipse_at_top,var(--color-surface-container-high),var(--color-background))] font-mono">
@@ -56,23 +109,26 @@ export default function Home() {
         </div>
       </div>
 
+      {error && <div className="mb-6 border border-error/40 bg-error/10 p-4 text-error text-xs">{error}</div>}
+
       <div className="masonry-grid flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-primary/20">
-        {mockFeed.map((item) => (
-          <div key={item.id} className="masonry-item relative group aspect-[3/4] border border-primary/30 overflow-hidden bg-black flex flex-col">
-            <img 
-              alt={item.id} 
-              className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-all duration-500" 
-              src={item.img} 
+        {visibleFeed.map((item, index) => (
+          <div key={`${item.id}-${index}`} className="masonry-item relative group aspect-[3/4] border border-primary/30 overflow-hidden bg-black flex flex-col">
+            <img
+              alt={item.id}
+              className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-all duration-500"
+              src={item.img}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
-            
+
             <div className="absolute top-4 right-4 z-10 font-code-data text-white/50 text-[10px] border border-white/20 px-2 py-1 bg-black/50 backdrop-blur-sm shadow-[0_0_10px_rgba(0,0,0,0.5)]">
               {item.id}
             </div>
 
             <div className="absolute bottom-0 left-0 right-0 p-4 transform translate-y-8 group-hover:translate-y-0 transition-transform flex flex-col gap-3 backdrop-blur-sm bg-gradient-to-t from-black/90 to-transparent">
+              {'title' in item && item.title && <div className="text-[10px] text-secondary uppercase tracking-widest line-clamp-1">{item.title}</div>}
               <p className="font-body-md text-white mb-2 line-clamp-3 text-sm">{item.prompt}</p>
-              <button 
+              <button
                 onClick={() => setPromptValue(item.prompt)}
                 className="w-full py-2 bg-primary text-black font-black text-xs uppercase shadow-[0_0_10px_rgba(0,243,255,0.5)] flex items-center justify-center gap-2 hover:bg-white hover:shadow-white/50 transition-all"
               >
@@ -84,38 +140,61 @@ export default function Home() {
         ))}
       </div>
 
-      {/* FIXED INPUT AREA */}
       <div className="fixed bottom-6 left-6 right-6 md:left-auto md:right-auto md:w-[calc(100%-3rem)] max-w-[960px] mx-auto bg-surface-container/90 backdrop-blur-xl border border-primary/40 p-5 rounded-sm shadow-[0_-20px_40px_rgba(0,0,0,0.8)] z-50 font-mono">
         <div className="flex items-center gap-4 mb-4">
           <div className="flex items-center gap-2 text-[10px] text-white/50 border-r border-white/10 pr-4">
-             <span className="w-2 h-2 bg-secondary rounded-full animate-pulse"></span> MODE: CREATION
+             <span className="w-2 h-2 bg-secondary rounded-full animate-pulse"></span> MODE: {selectedFile ? 'EDIT' : 'CREATION'}
           </div>
           <div className="text-[10px] text-primary uppercase tracking-widest truncate">
-            {promptValue ? "Selected Configuration Loaded" : "Awaiting Input..."}
+            {message || (promptValue ? 'Selected Configuration Loaded' : 'Awaiting Input...')}
           </div>
         </div>
-        
+
         <div className="flex flex-col sm:flex-row gap-4">
           <div className="flex-1 flex flex-col gap-2 relative">
-            <textarea 
+            <textarea
               value={promptValue}
               onChange={(e) => setPromptValue(e.target.value)}
-              className="w-full h-20 bg-black border border-primary/20 p-3 text-sm text-primary focus:outline-none focus:border-primary placeholder:text-primary/20 resize-none shadow-inner" 
-              placeholder="Enter your neural commands here..." 
+              className="w-full h-20 bg-black border border-primary/20 p-3 text-sm text-primary focus:outline-none focus:border-primary placeholder:text-primary/20 resize-none shadow-inner"
+              placeholder="Enter your neural commands here..."
             ></textarea>
             <div className="absolute top-0 right-0 p-2 text-[8px] text-primary/40 uppercase">
-              UTF-8 // AI-GEN // [{promptValue.length}/500]
+              UTF-8 // AI-GEN // [{promptValue.length}/8000]
             </div>
           </div>
-          
+
           <div className="flex gap-4">
-             <button className="w-20 md:w-24 h-20 border border-dashed border-primary/20 flex flex-col items-center justify-center cursor-pointer hover:bg-primary/5 transition-colors group">
-                 <ImagePlus className="w-6 h-6 mb-1 text-white/30 group-hover:text-primary transition-colors" />
-                 <span className="text-[9px] uppercase text-white/40 group-hover:text-primary">Ref Image</span>
-             </button>
-            <button className="w-32 bg-primary text-black font-black flex flex-col items-center justify-center hover:scale-95 transition-transform shadow-[0_0_15px_rgba(0,243,255,0.4)]">
-               <span className="text-xl mb-[-4px]">EXECUTE</span>
-               <span className="text-[10px] opacity-70 italic">GENERATE</span>
+            <input
+              ref={fileInputRef}
+              className="hidden"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) => setSelectedFile(event.target.files?.[0] || null)}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-20 md:w-24 h-20 border border-dashed border-primary/20 flex flex-col items-center justify-center cursor-pointer hover:bg-primary/5 transition-colors group relative"
+            >
+              {selectedFile ? (
+                <>
+                  <X className="w-5 h-5 mb-1 text-secondary" />
+                  <span className="text-[9px] uppercase text-secondary px-1 truncate max-w-full">{selectedFile.name}</span>
+                </>
+              ) : (
+                <>
+                  <ImagePlus className="w-6 h-6 mb-1 text-white/30 group-hover:text-primary transition-colors" />
+                  <span className="text-[9px] uppercase text-white/40 group-hover:text-primary">Ref Image</span>
+                </>
+              )}
+            </button>
+            <button
+              onClick={handleExecute}
+              disabled={loading || !promptValue.trim()}
+              className="w-32 bg-primary text-black font-black flex flex-col items-center justify-center hover:scale-95 transition-transform shadow-[0_0_15px_rgba(0,243,255,0.4)] disabled:opacity-40 disabled:hover:scale-100"
+            >
+              {loading ? <Loader2 className="animate-spin" size={24} /> : <span className="text-xl mb-[-4px]">EXECUTE</span>}
+              <span className="text-[10px] opacity-70 italic">{selectedFile ? 'EDIT' : 'GENERATE'}</span>
             </button>
           </div>
         </div>

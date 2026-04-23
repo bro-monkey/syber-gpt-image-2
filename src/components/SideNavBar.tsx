@@ -6,9 +6,9 @@ export default function SideNavBar() {
 
   const navItems = [
     { name: 'Generation History', path: '/history', icon: History },
-    { name: 'Account Overview', path: '#', icon: UserCircle },
+    { name: 'Account Overview', path: '/account', icon: UserCircle },
     { name: 'API Config', path: '/config', icon: Terminal },
-    { name: 'Billing', path: '#', icon: CreditCard },
+    { name: 'Billing', path: '/billing', icon: CreditCard },
   ];
 
   return (

@@ -1,7 +1,14 @@
 import { Link, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { AccountInfo, formatBalance, getAccount } from '../api';
 
 export default function TopNavBar() {
   const location = useLocation();
+  const [account, setAccount] = useState<AccountInfo | null>(null);
+
+  useEffect(() => {
+    getAccount().then(setAccount).catch(() => setAccount(null));
+  }, []);
 
   return (
     <header className="fixed top-0 left-0 w-full z-[100] flex justify-between items-center px-6 h-16 bg-surface-bright border-b border-primary/30 shadow-[0_0_20px_rgba(0,243,255,0.1)] shrink-0 font-mono">
@@ -30,15 +37,16 @@ export default function TopNavBar() {
           <div className="flex flex-col items-end">
             <span className="text-[10px] uppercase text-on-surface-variant">System Status</span>
             <span className="text-xs text-tertiary flex items-center gap-1">
-              <span className="w-1.5 h-1.5 bg-tertiary rounded-full animate-pulse"></span> API: ONLINE
+              <span className={`w-1.5 h-1.5 rounded-full ${account?.user.api_key_set ? 'bg-tertiary animate-pulse' : 'bg-error'}`}></span>
+              API: {account?.user.api_key_set ? 'ONLINE' : 'NO_KEY'}
             </span>
           </div>
           <div className="h-10 px-4 bg-surface-container-highest border border-primary/20 flex items-center gap-3 rounded-tr-xl">
             <span className="text-xs uppercase text-on-surface-variant">Credits</span>
-            <span className="font-bold text-lg text-secondary">⚡ 8,402</span>
-            <button className="ml-2 px-3 py-1 bg-secondary text-white text-[10px] font-bold uppercase hover:bg-secondary/80 transition-colors shadow-[0_0_10px_rgba(255,0,255,0.3)]">
+            <span className="font-bold text-lg text-secondary">⚡ {formatBalance(account?.balance)}</span>
+            <Link to="/billing" className="ml-2 px-3 py-1 bg-secondary text-white text-[10px] font-bold uppercase hover:bg-secondary/80 transition-colors shadow-[0_0_10px_rgba(255,0,255,0.3)]">
               Top Up
-            </button>
+            </Link>
           </div>
         </div>
         <Link to="/config" className="w-10 h-10 rounded-full border-2 border-secondary bg-gradient-to-tr from-secondary/20 to-transparent overflow-hidden cursor-pointer hover:border-primary transition-colors shadow-[0_0_8px_rgba(255,0,255,0.2)]">

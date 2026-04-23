@@ -1,20 +1,55 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# CyberGen Image Site
 
-# Run and deploy your AI Studio app
+React frontend plus a FastAPI backend for Sub2API/OpenAI-compatible image generation.
 
-This contains everything you need to run your app locally.
+Local services detected on this machine:
 
-View your app in AI Studio: https://ai.studio/apps/ed7f3451-5f9d-4c4f-8a71-5927a54a8c28
+- Sub2API: `http://127.0.0.1:9878`, OpenAI-compatible base URL `http://127.0.0.1:9878/v1`
+- cli-proxy-api: `http://127.0.0.1:8389`
 
-## Run Locally
+The app stores the Sub2API key in the backend SQLite database, calls `/v1/images/generations` for generation, `/v1/images/edits` for edits, and reads balance/usage from `/v1/usage`.
 
-**Prerequisites:**  Node.js
+The inspiration feed syncs GPT-Image-2 cases from:
 
+```text
+https://github.com/EvoLinkAI/awesome-gpt-image-2-prompts/blob/main/README.md
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+By default the backend parses the README on startup and refreshes it every 6 hours.
+
+## Run
+
+```bash
+npm install
+python3 -m pip install -r backend/requirements.txt
+npm run backend
+npm run dev
+```
+
+Open `http://127.0.0.1:3000`, then save your Sub2API key in `API Config`.
+
+## Backend
+
+```bash
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Important endpoints:
+
+- `GET /api/account`
+- `GET /api/balance`
+- `GET /api/history`
+- `POST /api/images/generate`
+- `POST /api/images/edit`
+- `PUT /api/config`
+- `GET /api/inspirations`
+- `POST /api/inspirations/sync`
+
+Generated image files are stored under `backend/storage/images`; uploaded edit references are stored under `backend/storage/uploads`.
+
+## Tests
+
+```bash
+PYTHONPATH=backend pytest backend/tests
+npm run build
+```

@@ -4,6 +4,8 @@ import SideNavBar from './components/SideNavBar';
 import Home from './pages/Home';
 import History from './pages/History';
 import Config from './pages/Config';
+import Account from './pages/Account';
+import Billing from './pages/Billing';
 
 export default function App() {
   return (
@@ -21,6 +23,18 @@ export default function App() {
           <>
             <SideNavBar />
             <Config />
+          </>
+        } />
+        <Route path="/account" element={
+          <>
+            <SideNavBar />
+            <Account />
+          </>
+        } />
+        <Route path="/billing" element={
+          <>
+            <SideNavBar />
+            <Billing />
           </>
         } />
       </Routes>
