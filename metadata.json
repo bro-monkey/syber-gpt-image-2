@@ -1,0 +1,6 @@
+{
+  "name": "CYBER_GEN",
+  "description": "Cyberpunk themed AI image generation dashboard using proxy backend setup.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

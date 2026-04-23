@@ -1,0 +1,109 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-surface: #05050a;
+  --color-surface-dim: #020204;
+  --color-surface-bright: #0a0a12;
+  --color-surface-container-lowest: #000000;
+  --color-surface-container-low: #05050a;
+  --color-surface-container: #0a0a14;
+  --color-surface-container-high: #0a0a1f;
+  --color-surface-container-highest: #11111d;
+  --color-on-surface: #ffffff;
+  --color-on-surface-variant: rgba(255, 255, 255, 0.5);
+  --color-inverse-surface: #ffffff;
+  --color-inverse-on-surface: #000000;
+  --color-outline: rgba(0, 243, 255, 0.3);
+  --color-outline-variant: rgba(255, 255, 255, 0.1);
+  --color-surface-tint: #00f3ff;
+
+  --color-primary: #00f3ff;
+  --color-on-primary: #020204;
+  --color-primary-container: rgba(0, 243, 255, 0.1);
+  --color-on-primary-container: #00f3ff;
+
+  --color-secondary: #ff00ff;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: rgba(255, 0, 255, 0.1);
+  --color-on-secondary-container: #ff00ff;
+
+  --color-tertiary: #4ade80;
+  --color-on-tertiary: #020204;
+  --color-tertiary-container: rgba(74, 222, 128, 0.1);
+  --color-on-tertiary-container: #4ade80;
+
+  --color-error: #ff3333;
+  --color-on-error: #ffffff;
+  --color-error-container: rgba(255, 51, 51, 0.1);
+  --color-on-error-container: #ff3333;
+
+  --color-background: #020204;
+  --color-on-background: #00f3ff;
+
+  --font-headline-xl: "JetBrains Mono", monospace;
+  --font-headline-md: "JetBrains Mono", monospace;
+  --font-body-lg: "JetBrains Mono", monospace;
+  --font-body-md: "JetBrains Mono", monospace;
+  --font-code-data: "JetBrains Mono", monospace;
+  --font-label-caps: "JetBrains Mono", monospace;
+}
+
+@layer utilities {
+  .glitch-hover:hover {
+      position: relative;
+  }
+  .glitch-hover:hover::before {
+      content: '';
+      position: absolute;
+      top: 0; left: -2px; width: 100%; height: 100%;
+      background: rgba(0,243,255,0.1);
+      transform: translateX(4px);
+      z-index: -1;
+      mix-blend-mode: screen;
+  }
+  .glitch-hover:hover::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 2px; width: 100%; height: 100%;
+      background: rgba(255,0,255,0.1);
+      transform: translateX(-4px);
+      z-index: -1;
+      mix-blend-mode: screen;
+  }
+  
+  .masonry-grid {
+      column-count: 1;
+      column-gap: 24px;
+  }
+  @media (min-width: 640px) { .masonry-grid { column-count: 2; } }
+  @media (min-width: 1024px) { .masonry-grid { column-count: 3; } }
+  @media (min-width: 1280px) { .masonry-grid { column-count: 4; } }
+  
+  .masonry-item {
+      break-inside: avoid;
+      margin-bottom: 24px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-surface);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-surface-variant);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 243, 255, 0.3);
+  }
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-on-background);
+  font-family: var(--font-body-md);
+  margin: 0;
+}
