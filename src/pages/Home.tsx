@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ImagePlus, Grid, List, RefreshCw, Loader2, X } from 'lucide-react';
 import { editImage, generateImage, getHistory, getInspirations, HistoryItem, InspirationItem } from '../api';
+import { useAuth } from '../auth';
 
 const mockFeed = [
   {
@@ -36,6 +37,7 @@ const mockFeed = [
 ];
 
 export default function Home() {
+  const { viewer } = useAuth();
   const [promptValue, setPromptValue] = useState('');
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [inspirations, setInspirations] = useState<InspirationItem[]>([]);
@@ -52,7 +54,7 @@ export default function Home() {
         setInspirations(inspirationData.items);
       })
       .catch((err) => setError(err.message));
-  }, []);
+  }, [viewer?.owner_id]);
 
   async function handleExecute() {
     const prompt = promptValue.trim();
@@ -98,6 +100,9 @@ export default function Home() {
               <span className="w-4 h-[1px] bg-secondary"></span> System.Scan
            </div>
           <h1 className="text-4xl md:text-5xl text-on-surface font-bold tracking-tighter">INSPIRATION_FEED</h1>
+          <div className="text-xs text-white/40 uppercase tracking-widest">
+            {viewer?.authenticated ? `Owner ${viewer.user?.username || viewer.user?.email}` : `Guest ${viewer?.guest_id?.slice(0, 8) || '--'}`}
+          </div>
         </div>
         <div className="hidden sm:flex gap-2">
           <button className="w-10 h-10 border border-outline-variant flex items-center justify-center text-outline-variant hover:text-primary hover:border-primary bg-surface-container-low transition-colors">

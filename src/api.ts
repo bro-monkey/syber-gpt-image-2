@@ -1,18 +1,36 @@
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
+export type ViewerInfo = {
+  authenticated: boolean;
+  owner_id: string;
+  guest_id: string;
+  api_key_source: 'managed' | 'manual';
+  user: {
+    id: number;
+    email: string;
+    username: string;
+  } | null;
+};
+
 export type AppConfig = {
+  owner_id: string;
   base_url: string;
   usage_path: string;
   model: string;
   default_size: string;
   default_quality: string;
   user_name: string;
+  managed_by_auth: boolean;
   api_key_set: boolean;
   api_key_hint: string;
+  api_key_editable: boolean;
+  base_url_editable: boolean;
+  authenticated: boolean;
 };
 
 export type HistoryItem = {
   id: string;
+  owner_id: string;
   mode: 'generate' | 'edit';
   prompt: string;
   model: string;
@@ -64,9 +82,15 @@ export type BalanceInfo = {
 };
 
 export type AccountInfo = {
+  viewer: ViewerInfo;
   user: {
     name: string;
+    email: string | null;
+    username: string | null;
+    authenticated: boolean;
+    guest: boolean;
     api_key_set: boolean;
+    api_key_source: 'managed' | 'manual';
     model: string;
     base_url: string;
   };
@@ -81,6 +105,7 @@ export type AccountInfo = {
 
 export type LedgerEntry = {
   id: string;
+  owner_id: string;
   event_type: string;
   amount: number;
   currency: string;
@@ -98,8 +123,31 @@ export type GeneratePayload = {
   n?: number;
 };
 
+export type PublicAuthSettings = {
+  registration_enabled: boolean;
+  email_verify_enabled: boolean;
+  force_email_on_third_party_signup: boolean;
+  promo_code_enabled: boolean;
+  invitation_code_enabled: boolean;
+  totp_enabled: boolean;
+  turnstile_enabled: boolean;
+  turnstile_site_key: string;
+  backend_mode_enabled: boolean;
+  site_name: string;
+  site_subtitle: string;
+};
+
+export type LoginResult = {
+  ok: boolean;
+  viewer?: ViewerInfo;
+  requires_2fa?: boolean;
+  temp_token?: string;
+  user_email_masked?: string;
+};
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
+    credentials: 'include',
     ...options,
     headers: {
       ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
@@ -113,6 +161,56 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
   }
   return data as T;
+}
+
+export function getSession() {
+  return request<ViewerInfo>('/api/auth/session');
+}
+
+export function getAuthPublicSettings() {
+  return request<PublicAuthSettings>('/api/auth/public-settings');
+}
+
+export function sendVerifyCode(payload: { email: string; turnstile_token?: string }) {
+  return request<{ message: string; countdown: number }>('/api/auth/send-verify-code', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function registerAccount(payload: {
+  email: string;
+  password: string;
+  verify_code?: string;
+  turnstile_token?: string;
+  promo_code?: string;
+  invitation_code?: string;
+}) {
+  return request<LoginResult>('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function loginAccount(payload: { email: string; password: string; turnstile_token?: string }) {
+  return request<LoginResult>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function loginAccount2FA(payload: { temp_token: string; totp_code: string }) {
+  return request<LoginResult>('/api/auth/login/2fa', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function logoutAccount() {
+  return request<{ ok: boolean }>('/api/auth/logout', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
 }
 
 export function getConfig() {

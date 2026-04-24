@@ -1,9 +1,25 @@
-import { FormEvent, useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
-import { EyeOff, Save, Activity, ShieldAlert, ArrowRight, Server, Loader2, PlugZap } from 'lucide-react';
-import { AccountInfo, AppConfig, InspirationStats, LedgerEntry, formatBalance, formatDate, getAccount, getConfig, getInspirationStats, getLedger, saveConfig, syncInspirations, testConfig } from '../api';
+import { FormEvent, ReactNode, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Activity, ArrowRight, EyeOff, Loader2, PlugZap, Save, Server, ShieldAlert } from 'lucide-react';
+import {
+  AccountInfo,
+  AppConfig,
+  InspirationStats,
+  LedgerEntry,
+  formatBalance,
+  formatDate,
+  getAccount,
+  getConfig,
+  getInspirationStats,
+  getLedger,
+  saveConfig,
+  syncInspirations,
+  testConfig,
+} from '../api';
+import { useAuth } from '../auth';
 
 export default function Config() {
+  const { viewer } = useAuth();
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [account, setAccount] = useState<AccountInfo | null>(null);
@@ -14,7 +30,12 @@ export default function Config() {
   const [saving, setSaving] = useState(false);
 
   async function refresh() {
-    const [configData, accountData, ledgerData, inspirationData] = await Promise.all([getConfig(), getAccount(), getLedger(8), getInspirationStats()]);
+    const [configData, accountData, ledgerData, inspirationData] = await Promise.all([
+      getConfig(),
+      getAccount(),
+      getLedger(8),
+      getInspirationStats(),
+    ]);
     setConfig(configData);
     setAccount(accountData);
     setLedger(ledgerData.items);
@@ -23,7 +44,7 @@ export default function Config() {
 
   useEffect(() => {
     refresh().catch((err) => setError(err.message));
-  }, []);
+  }, [viewer?.owner_id]);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -33,8 +54,13 @@ export default function Config() {
     setStatus('');
     try {
       const updated = await saveConfig({
-        ...config,
-        api_key: apiKey.trim() || undefined,
+        model: config.model,
+        default_size: config.default_size,
+        default_quality: config.default_quality,
+        user_name: config.managed_by_auth ? undefined : config.user_name,
+        base_url: config.base_url_editable ? config.base_url : undefined,
+        usage_path: config.base_url_editable ? config.usage_path : undefined,
+        api_key: config.api_key_editable ? apiKey.trim() || undefined : undefined,
       });
       setConfig(updated);
       setApiKey('');
@@ -90,11 +116,16 @@ export default function Config() {
         </div>
         <div className="flex flex-col gap-1">
           <div className="text-[10px] text-secondary uppercase font-bold tracking-widest flex items-center gap-2">
-            <span className="w-4 h-[1px] bg-secondary"></span> User Profile
+            <span className="w-4 h-[1px] bg-secondary"></span> Owner Profile
           </div>
           <h1 className="text-3xl md:text-5xl text-on-surface font-bold">{config?.user_name || 'NEON_USER_404'}</h1>
           <div className="flex items-center gap-4 text-xs mt-2 border border-white/10 bg-white/5 py-1 px-3 w-fit">
-            <span className="text-white/50 uppercase">Session: <span className={config?.api_key_set ? 'text-tertiary' : 'text-error'}>{config?.api_key_set ? 'Active' : 'Missing Key'}</span></span>
+            <span className="text-white/50 uppercase">
+              Mode:{' '}
+              <span className={config?.managed_by_auth ? 'text-tertiary' : 'text-primary'}>
+                {config?.managed_by_auth ? 'Sub2API User' : 'Guest'}
+              </span>
+            </span>
             <span className="text-white/20">|</span>
             <span className="text-primary uppercase flex items-center gap-1">
               <span className="w-1.5 h-1.5 bg-primary rounded-full"></span> Balance: {formatBalance(account?.balance)}
@@ -109,21 +140,39 @@ export default function Config() {
         </div>
       )}
 
+      {!config?.managed_by_auth && (
+        <div className="mb-6 border border-primary/20 bg-primary/5 p-4 text-xs text-white/60 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+          <div>Guest sessions use manual Sub2API API keys. Register or sign in to bind a per-user key automatically.</div>
+          <div className="flex gap-3">
+            <Link className="border border-primary/40 px-4 py-2 text-primary uppercase tracking-widest hover:bg-primary/10" to="/login">
+              Sign In
+            </Link>
+            <Link className="border border-secondary/40 px-4 py-2 text-secondary uppercase tracking-widest hover:bg-secondary/10" to="/register">
+              Register
+            </Link>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
         <div className="col-span-12 lg:col-span-8 bg-black border border-primary/20 p-6 md:p-8 relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-3 text-[9px] text-primary/40 uppercase border-b border-l border-primary/20 bg-primary/5">Node_CFG_01</div>
+          <div className="absolute top-0 right-0 p-3 text-[9px] text-primary/40 uppercase border-b border-l border-primary/20 bg-primary/5">Owner_CFG</div>
 
           <h2 className="text-xl text-primary mb-8 uppercase flex items-center gap-3 font-bold border-b border-primary/20 pb-4">
             <Server className="text-primary" size={20} />
-            External Proxy Binding
+            Runtime Binding
           </h2>
 
           <div className="bg-primary/5 border border-primary/20 border-l-2 border-l-tertiary p-5 mb-8 flex gap-4 relative">
             <ShieldAlert className="text-tertiary mt-1 shrink-0" size={20} />
             <div>
-              <h3 className="text-white mb-1 font-bold tracking-widest text-[10px] uppercase">Local Tunnel Active</h3>
+              <h3 className="text-white mb-1 font-bold tracking-widest text-[10px] uppercase">
+                {config?.managed_by_auth ? 'Managed Account Session' : 'Guest Session'}
+              </h3>
               <p className="text-white/50 text-xs leading-relaxed">
-                Browser requests go to this FastAPI backend. The backend calls local Sub2API at 127.0.0.1:9878 and stores generated image files locally.
+                {config?.managed_by_auth
+                  ? 'This config is attached to the signed-in Sub2API user. The personal API key is selected automatically and not edited here.'
+                  : 'Guest mode keeps data isolated by guest cookie. This mode uses a manually saved Sub2API API key.'}
               </p>
             </div>
           </div>
@@ -145,11 +194,21 @@ export default function Config() {
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-6">
             <Field label="USER_NAME">
-              <input className="input-cyber" value={config?.user_name || ''} onChange={(event) => setConfig((current) => current && { ...current, user_name: event.target.value })} />
+              <input
+                className="input-cyber"
+                disabled={config?.managed_by_auth}
+                value={config?.user_name || ''}
+                onChange={(event) => setConfig((current) => current && { ...current, user_name: event.target.value })}
+              />
             </Field>
 
             <Field label="SUB2API_BASE_URL">
-              <input className="input-cyber" value={config?.base_url || ''} onChange={(event) => setConfig((current) => current && { ...current, base_url: event.target.value })} />
+              <input
+                className="input-cyber"
+                disabled={!config?.base_url_editable}
+                value={config?.base_url || ''}
+                onChange={(event) => setConfig((current) => current && { ...current, base_url: event.target.value })}
+              />
             </Field>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -175,7 +234,12 @@ export default function Config() {
             </div>
 
             <Field label="USAGE_PATH">
-              <input className="input-cyber" value={config?.usage_path || '/v1/usage'} onChange={(event) => setConfig((current) => current && { ...current, usage_path: event.target.value })} />
+              <input
+                className="input-cyber"
+                disabled={!config?.base_url_editable}
+                value={config?.usage_path || '/v1/usage'}
+                onChange={(event) => setConfig((current) => current && { ...current, usage_path: event.target.value })}
+              />
             </Field>
 
             <div className="flex flex-col gap-2 relative">
@@ -183,17 +247,20 @@ export default function Config() {
               <div className="relative">
                 <input
                   className="input-cyber pr-12"
+                  disabled={!config?.api_key_editable}
                   id="api_key"
                   placeholder={config?.api_key_set ? config.api_key_hint : 'sk-...'}
                   type="password"
-                  value={apiKey}
+                  value={config?.api_key_editable ? apiKey : config?.api_key_hint || ''}
                   onChange={(event) => setApiKey(event.target.value)}
                 />
                 <button className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-secondary transition-colors" type="button">
                   <EyeOff size={16} />
                 </button>
               </div>
-              <span className="text-[9px] text-white/30 text-right uppercase">Saved key: {config?.api_key_set ? config.api_key_hint : 'NONE'}</span>
+              <span className="text-[9px] text-white/30 text-right uppercase">
+                Saved key: {config?.api_key_set ? config.api_key_hint : 'NONE'} {config?.managed_by_auth ? '(managed)' : ''}
+              </span>
             </div>
 
             <div className="pt-6 flex flex-col sm:flex-row gap-3 justify-end border-t border-white/10 mt-4">
@@ -238,9 +305,9 @@ export default function Config() {
               ))}
             </div>
 
-            <a href="/billing" className="w-full mt-6 py-2 border border-primary/30 text-primary text-[10px] uppercase tracking-widest hover:bg-primary/10 transition-colors flex items-center justify-center gap-2">
+            <Link to="/billing" className="w-full mt-6 py-2 border border-primary/30 text-primary text-[10px] uppercase tracking-widest hover:bg-primary/10 transition-colors flex items-center justify-center gap-2">
               VIEW FULL LEDGER <ArrowRight size={12} />
-            </a>
+            </Link>
           </div>
         </div>
       </div>

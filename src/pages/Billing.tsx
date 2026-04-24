@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Activity, ArrowRight, CreditCard } from 'lucide-react';
 import { BalanceInfo, LedgerEntry, formatBalance, formatDate, getBalance, getLedger } from '../api';
+import { useAuth } from '../auth';
 
 export default function Billing() {
+  const { viewer } = useAuth();
   const [balance, setBalance] = useState<BalanceInfo>();
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [error, setError] = useState('');
@@ -14,7 +16,7 @@ export default function Billing() {
         setLedger(ledgerData.items);
       })
       .catch((err) => setError(err.message));
-  }, []);
+  }, [viewer?.owner_id]);
 
   return (
     <div className="md:ml-64 px-6 md:px-12 py-8 max-w-[1440px] mx-auto min-h-screen pt-24 pb-12 bg-[radial-gradient(ellipse_at_top,var(--color-surface-container-high),var(--color-background))] font-mono">

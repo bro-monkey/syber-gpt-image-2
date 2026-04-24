@@ -10,12 +10,20 @@ def _env_path(name: str, default: Path) -> Path:
     return Path(value).expanduser().resolve() if value else default.resolve()
 
 
+def _derive_auth_base_url(provider_base_url: str) -> str:
+    base_url = provider_base_url.rstrip("/")
+    if base_url.endswith("/v1"):
+        return base_url[:-3]
+    return base_url
+
+
 @dataclass(frozen=True)
 class Settings:
     backend_dir: Path
     database_path: Path
     storage_dir: Path
     provider_base_url: str
+    auth_base_url: str
     provider_usage_path: str
     image_model: str
     default_size: str
@@ -26,10 +34,16 @@ class Settings:
     inspiration_source_url: str
     inspiration_sync_interval_seconds: float
     inspiration_sync_on_startup: bool
+    session_cookie_name: str
+    guest_cookie_name: str
+    session_ttl_seconds: int
+    guest_ttl_seconds: int
+    cookie_secure: bool
 
     @classmethod
     def from_env(cls) -> "Settings":
         backend_dir = Path(__file__).resolve().parents[1]
+        provider_base_url = os.getenv("SUB2API_BASE_URL", "http://127.0.0.1:9878/v1").rstrip("/")
         cors_origins = [
             origin.strip()
             for origin in os.getenv(
@@ -42,7 +56,8 @@ class Settings:
             backend_dir=backend_dir,
             database_path=_env_path("DATABASE_PATH", backend_dir / "data" / "app.sqlite3"),
             storage_dir=_env_path("STORAGE_DIR", backend_dir / "storage"),
-            provider_base_url=os.getenv("SUB2API_BASE_URL", "http://127.0.0.1:9878/v1").rstrip("/"),
+            provider_base_url=provider_base_url,
+            auth_base_url=os.getenv("SUB2API_AUTH_BASE_URL", _derive_auth_base_url(provider_base_url)).rstrip("/"),
             provider_usage_path=os.getenv("SUB2API_USAGE_PATH", "/v1/usage"),
             image_model=os.getenv("IMAGE_MODEL", "gpt-image-2"),
             default_size=os.getenv("IMAGE_SIZE", "1024x1024"),
@@ -57,6 +72,11 @@ class Settings:
             inspiration_sync_interval_seconds=float(os.getenv("INSPIRATION_SYNC_INTERVAL_SECONDS", "21600")),
             inspiration_sync_on_startup=os.getenv("INSPIRATION_SYNC_ON_STARTUP", "true").lower()
             not in {"0", "false", "no", "off"},
+            session_cookie_name=os.getenv("SESSION_COOKIE_NAME", "cybergen_session"),
+            guest_cookie_name=os.getenv("GUEST_COOKIE_NAME", "cybergen_guest"),
+            session_ttl_seconds=int(os.getenv("SESSION_TTL_SECONDS", str(30 * 24 * 60 * 60))),
+            guest_ttl_seconds=int(os.getenv("GUEST_TTL_SECONDS", str(365 * 24 * 60 * 60))),
+            cookie_secure=os.getenv("COOKIE_SECURE", "false").lower() in {"1", "true", "yes", "on"},
         )
 
     @property

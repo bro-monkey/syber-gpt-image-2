@@ -1,0 +1,168 @@
+import { FormEvent, ReactNode, useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Loader2, MailPlus, Send } from 'lucide-react';
+import { PublicAuthSettings, getAuthPublicSettings, registerAccount, sendVerifyCode } from '../api';
+import { useAuth } from '../auth';
+
+export default function Register() {
+  const navigate = useNavigate();
+  const { viewer, setViewer } = useAuth();
+  const [settings, setSettings] = useState<PublicAuthSettings | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [verifyCode, setVerifyCode] = useState('');
+  const [promoCode, setPromoCode] = useState('');
+  const [invitationCode, setInvitationCode] = useState('');
+  const [countdown, setCountdown] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    getAuthPublicSettings().then(setSettings).catch(() => setSettings(null));
+  }, []);
+
+  useEffect(() => {
+    if (viewer?.authenticated) {
+      navigate('/account', { replace: true });
+    }
+  }, [viewer, navigate]);
+
+  useEffect(() => {
+    if (!countdown) return;
+    const timer = window.setTimeout(() => setCountdown((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [countdown]);
+
+  const canRegister = useMemo(() => settings?.registration_enabled !== false && settings?.backend_mode_enabled !== true, [settings]);
+
+  async function handleSendCode() {
+    setSendingCode(true);
+    setError('');
+    setStatus('');
+    try {
+      const result = await sendVerifyCode({ email: email.trim() });
+      setStatus(result.message);
+      setCountdown(result.countdown || 60);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSendingCode(false);
+    }
+  }
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+    setStatus('');
+    try {
+      const result = await registerAccount({
+        email: email.trim(),
+        password,
+        verify_code: settings?.email_verify_enabled ? verifyCode.trim() : undefined,
+        promo_code: settings?.promo_code_enabled ? promoCode.trim() || undefined : undefined,
+        invitation_code: settings?.invitation_code_enabled ? invitationCode.trim() || undefined : undefined,
+      });
+      if (result.viewer) {
+        setViewer(result.viewer);
+        navigate('/account', { replace: true });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="px-6 py-24 max-w-[760px] mx-auto min-h-screen flex items-center">
+      <section className="w-full border border-primary/25 bg-black/70 p-8 md:p-10 shadow-[0_0_40px_rgba(255,0,255,0.08)]">
+        <div className="text-[10px] text-secondary uppercase tracking-widest font-bold mb-3">
+          {settings?.site_name || 'CYBERGEN'} Enrollment
+        </div>
+        <h1 className="text-3xl md:text-4xl font-black text-white mb-3 uppercase">Create Account</h1>
+        <p className="text-sm text-white/50 mb-8">
+          Registration happens from this image site, but the account source is your deployed sub2api instance.
+        </p>
+
+        {(error || status) && (
+          <div className={`mb-6 border p-4 text-xs ${error ? 'border-error/40 bg-error/10 text-error' : 'border-tertiary/40 bg-tertiary/10 text-tertiary'}`}>
+            {error || status}
+          </div>
+        )}
+
+        {!canRegister && (
+          <div className="border border-error/40 bg-error/10 p-4 text-xs text-error">
+            Registration is disabled on the connected sub2api service.
+          </div>
+        )}
+
+        <form className="space-y-5 mt-6" onSubmit={handleSubmit}>
+          <Field label="Email">
+            <input className="input-cyber" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+          </Field>
+
+          <Field label="Password">
+            <input className="input-cyber" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          </Field>
+
+          {settings?.email_verify_enabled && (
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
+              <Field label="Verify Code">
+                <input className="input-cyber" value={verifyCode} onChange={(event) => setVerifyCode(event.target.value)} />
+              </Field>
+              <button
+                className="h-[46px] px-5 border border-primary/30 text-primary uppercase tracking-widest text-xs hover:bg-primary/10 disabled:opacity-50 flex items-center justify-center gap-2"
+                disabled={sendingCode || !email.trim() || countdown > 0}
+                type="button"
+                onClick={handleSendCode}
+              >
+                {sendingCode ? <Loader2 className="animate-spin" size={14} /> : <Send size={14} />}
+                {countdown > 0 ? `${countdown}s` : 'Send Code'}
+              </button>
+            </div>
+          )}
+
+          {settings?.promo_code_enabled && (
+            <Field label="Promo Code">
+              <input className="input-cyber" value={promoCode} onChange={(event) => setPromoCode(event.target.value)} />
+            </Field>
+          )}
+
+          {settings?.invitation_code_enabled && (
+            <Field label="Invitation Code">
+              <input className="input-cyber" value={invitationCode} onChange={(event) => setInvitationCode(event.target.value)} />
+            </Field>
+          )}
+
+          <button
+            className="w-full bg-secondary text-white font-bold px-6 py-3 uppercase tracking-widest hover:bg-white hover:text-black transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            disabled={loading || !canRegister}
+            type="submit"
+          >
+            {loading ? <Loader2 className="animate-spin" size={16} /> : <MailPlus size={16} />}
+            Register
+          </button>
+        </form>
+
+        <div className="mt-6 pt-6 border-t border-white/10 text-xs text-white/50 flex items-center justify-between gap-4">
+          <span>Already registered?</span>
+          <Link className="text-primary uppercase tracking-widest hover:text-secondary" to="/login">
+            Sign In
+          </Link>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <label className="text-[10px] text-secondary uppercase tracking-widest font-bold">{label}</label>
+      {children}
+    </div>
+  );
+}

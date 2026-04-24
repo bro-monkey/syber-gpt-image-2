@@ -6,6 +6,8 @@ import History from './pages/History';
 import Config from './pages/Config';
 import Account from './pages/Account';
 import Billing from './pages/Billing';
+import Login from './pages/Login';
+import Register from './pages/Register';
 
 export default function App() {
   return (
@@ -37,6 +39,8 @@ export default function App() {
             <Billing />
           </>
         } />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
       </Routes>
     </div>
   );

@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Activity, Database, Server, UserCircle } from 'lucide-react';
 import { AccountInfo, formatBalance, formatDate, getAccount } from '../api';
+import { useAuth } from '../auth';
 
 export default function Account() {
+  const { viewer } = useAuth();
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     getAccount().then(setAccount).catch((err) => setError(err.message));
-  }, []);
+  }, [viewer?.owner_id]);
 
   return (
     <div className="md:ml-64 px-6 md:px-12 py-8 max-w-[1440px] mx-auto min-h-screen pt-24 pb-12 bg-[radial-gradient(ellipse_at_top,var(--color-surface-container-high),var(--color-background))] font-mono">
@@ -27,9 +29,11 @@ export default function Account() {
             <UserCircle size={18} /> Identity
           </h2>
           <div className="space-y-4 text-sm">
+            <Row label="OWNER" value={account?.user.authenticated ? 'REGISTERED USER' : 'GUEST SESSION'} />
             <Row label="USER" value={account?.user.name || '--'} />
+            <Row label="EMAIL" value={account?.user.email || '--'} />
             <Row label="MODEL" value={account?.user.model || 'gpt-image-2'} />
-            <Row label="API KEY" value={account?.user.api_key_set ? 'CONFIGURED' : 'MISSING'} />
+            <Row label="API KEY" value={account?.user.api_key_set ? (account?.user.api_key_source === 'managed' ? 'BOUND TO SUB2API USER' : 'MANUAL GUEST KEY') : 'MISSING'} />
             <Row label="BASE URL" value={account?.user.base_url || 'http://127.0.0.1:9878/v1'} />
           </div>
         </section>

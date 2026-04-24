@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Search, Filter, Download, Trash2, RefreshCw, ArrowDown, Loader2 } from 'lucide-react';
 import { deleteHistory, formatDate, generateImage, getHistory, HistoryItem } from '../api';
+import { useAuth } from '../auth';
 
 const getColorClasses = (colorMode: string) => {
   if (colorMode === 'primary') {
@@ -24,6 +25,7 @@ const getColorClasses = (colorMode: string) => {
 };
 
 export default function History() {
+  const { viewer } = useAuth();
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [query, setQuery] = useState('');
   const [offset, setOffset] = useState(0);
@@ -46,7 +48,7 @@ export default function History() {
 
   useEffect(() => {
     load(0, false);
-  }, []);
+  }, [viewer?.owner_id]);
 
   async function handleDelete(id: string) {
     await deleteHistory(id);

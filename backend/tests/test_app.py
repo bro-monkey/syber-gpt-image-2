@@ -6,7 +6,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from app.inspirations import parse_inspiration_markdown
-from app.main import create_app, _db, _provider, _settings
+from app.main import create_app, _auth_client, _db, _provider, _settings
 from app.settings import Settings
 
 
@@ -37,31 +37,94 @@ class FakeProvider:
         return {"created": 124, "data": [{"b64_json": PNG_B64}], "usage": {"total_tokens": 2}}
 
 
-def make_client(tmp_path: Path) -> TestClient:
+class FakeAuthClient:
+    def __init__(self) -> None:
+        self.created_keys: list[dict[str, Any]] = []
+
+    async def public_settings(self, base_url: str) -> dict[str, Any]:
+        return {"registration_enabled": True, "email_verify_enabled": False, "backend_mode_enabled": False, "site_name": "demo"}
+
+    async def send_verify_code(self, base_url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"message": "sent", "countdown": 60}
+
+    async def register(self, base_url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "access_token": "access-demo",
+            "refresh_token": "refresh-demo",
+            "token_type": "Bearer",
+            "user": {"id": 7, "email": payload["email"], "username": "demo-user"},
+        }
+
+    async def login(self, base_url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "access_token": "access-demo",
+            "refresh_token": "refresh-demo",
+            "token_type": "Bearer",
+            "user": {"id": 7, "email": payload["email"], "username": "demo-user"},
+        }
+
+    async def login_2fa(self, base_url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "access_token": "access-demo",
+            "refresh_token": "refresh-demo",
+            "token_type": "Bearer",
+            "user": {"id": 7, "email": "demo@example.com", "username": "demo-user"},
+        }
+
+    async def list_keys(self, base_url: str, access_token: str) -> list[dict[str, Any]]:
+        return []
+
+    async def list_available_groups(self, base_url: str, access_token: str) -> list[dict[str, Any]]:
+        return [{"id": 42, "platform": "openai", "status": "active"}]
+
+    async def create_key(self, base_url: str, access_token: str, payload: dict[str, Any]) -> dict[str, Any]:
+        key = {
+            "id": 99,
+            "key": "sk-user-managed-123456",
+            "name": payload["name"],
+            "group": {"id": payload.get("group_id"), "platform": "openai"},
+            "status": "active",
+        }
+        self.created_keys.append(key)
+        return key
+
+
+def make_app(tmp_path: Path, auth_client: FakeAuthClient | None = None):
     settings = Settings(
         backend_dir=tmp_path,
         database_path=tmp_path / "data" / "app.sqlite3",
         storage_dir=tmp_path / "storage",
         provider_base_url="http://127.0.0.1:9878/v1",
+        auth_base_url="http://127.0.0.1:9878",
         provider_usage_path="/v1/usage",
         image_model="gpt-image-2",
         default_size="1024x1024",
         default_quality="medium",
         user_name="tester",
-        cors_origins=["*"],
+        cors_origins=["http://127.0.0.1:3000"],
         request_timeout_seconds=10,
         inspiration_source_url="https://example.com/README.md",
         inspiration_sync_interval_seconds=0,
         inspiration_sync_on_startup=False,
+        session_cookie_name="cybergen_session",
+        guest_cookie_name="cybergen_guest",
+        session_ttl_seconds=3600,
+        guest_ttl_seconds=86400,
+        cookie_secure=False,
     )
-    app = create_app(settings=settings, provider=FakeProvider())
+    app = create_app(settings=settings, provider=FakeProvider(), auth_client=auth_client or FakeAuthClient())
     app.dependency_overrides[_db] = lambda: app.state.db
     app.dependency_overrides[_settings] = lambda: app.state.settings
     app.dependency_overrides[_provider] = lambda: app.state.provider
-    return TestClient(app)
+    app.dependency_overrides[_auth_client] = lambda: app.state.auth_client
+    return app
 
 
-def test_config_masks_api_key(tmp_path: Path) -> None:
+def make_client(tmp_path: Path, auth_client: FakeAuthClient | None = None) -> TestClient:
+    return TestClient(make_app(tmp_path, auth_client=auth_client))
+
+
+def test_guest_config_masks_api_key(tmp_path: Path) -> None:
     client = make_client(tmp_path)
     response = client.put("/api/config", json={"api_key": "sk-test-123456", "user_name": "Neo"})
     assert response.status_code == 200
@@ -69,23 +132,26 @@ def test_config_masks_api_key(tmp_path: Path) -> None:
     assert data["api_key_set"] is True
     assert data["api_key_hint"] == "sk-tes...3456"
     assert data["user_name"] == "Neo"
+    assert data["managed_by_auth"] is False
 
 
-def test_generate_persists_image_and_history(tmp_path: Path) -> None:
-    client = make_client(tmp_path)
-    client.put("/api/config", json={"api_key": "sk-test-123456"})
+def test_guest_history_is_isolated_by_cookie(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    client_a = TestClient(app)
+    client_b = TestClient(app)
 
-    response = client.post("/api/images/generate", json={"prompt": "neon city"})
+    client_a.put("/api/config", json={"api_key": "sk-test-123456"})
+    generated = client_a.post("/api/images/generate", json={"prompt": "neon city"})
+    assert generated.status_code == 200
 
-    assert response.status_code == 200
-    item = response.json()["items"][0]
-    assert item["status"] == "succeeded"
-    assert item["image_url"].startswith("/storage/images/")
-    assert Path(item["image_path"]).exists()
+    history_a = client_a.get("/api/history").json()["items"]
+    history_b = client_b.get("/api/history").json()["items"]
+    config_b = client_b.get("/api/config").json()
 
-    history = client.get("/api/history").json()["items"]
-    assert len(history) == 1
-    assert history[0]["prompt"] == "neon city"
+    assert len(history_a) == 1
+    assert history_a[0]["prompt"] == "neon city"
+    assert history_b == []
+    assert config_b["api_key_set"] is False
 
 
 def test_edit_persists_upload_and_result(tmp_path: Path) -> None:
@@ -116,6 +182,31 @@ def test_account_includes_balance_and_stats(tmp_path: Path) -> None:
     data = response.json()
     assert data["balance"]["remaining"] == 12.5
     assert data["stats"]["total"] == 1
+    assert data["viewer"]["authenticated"] is False
+
+
+def test_login_binds_managed_key_and_merges_guest_history(tmp_path: Path) -> None:
+    auth = FakeAuthClient()
+    client = make_client(tmp_path, auth_client=auth)
+
+    client.put("/api/config", json={"api_key": "sk-guest-123456"})
+    client.post("/api/images/generate", json={"prompt": "guest prompt"})
+
+    login = client.post("/api/auth/login", json={"email": "demo@example.com", "password": "secret123"})
+    assert login.status_code == 200
+    assert login.json()["viewer"]["authenticated"] is True
+    assert auth.created_keys and auth.created_keys[0]["name"] == "cybergen-image"
+
+    config = client.get("/api/config").json()
+    history = client.get("/api/history").json()["items"]
+    account = client.get("/api/account").json()
+
+    assert config["managed_by_auth"] is True
+    assert config["api_key_hint"] == "sk-use...3456"
+    assert len(history) == 1
+    assert history[0]["prompt"] == "guest prompt"
+    assert account["viewer"]["user"]["email"] == "demo@example.com"
+    assert account["user"]["api_key_source"] == "managed"
 
 
 def test_parse_inspiration_markdown() -> None:

@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 from uuid import uuid4
 
-import asyncio
-from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from .auth_client import Sub2APIAuthClient
 from .db import Database
 from .inspirations import run_inspiration_sync_loop, sync_inspirations
 from .provider import OpenAICompatibleImageClient, ProviderError
@@ -39,9 +41,55 @@ class GenerateRequest(BaseModel):
     output_format: str | None = None
 
 
+class AuthSendVerifyCodeRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    turnstile_token: str | None = None
+
+
+class AuthRegisterRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=6, max_length=256)
+    verify_code: str | None = None
+    turnstile_token: str | None = None
+    promo_code: str | None = None
+    invitation_code: str | None = None
+
+
+class AuthLoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=256)
+    turnstile_token: str | None = None
+
+
+class AuthLogin2FARequest(BaseModel):
+    temp_token: str = Field(min_length=1, max_length=2048)
+    totp_code: str = Field(min_length=6, max_length=6)
+
+
+@dataclass
+class ViewerContext:
+    owner_id: str
+    guest_owner_id: str
+    guest_id: str
+    authenticated: bool
+    session_id: str | None
+    session: dict[str, Any] | None
+
+    @property
+    def user(self) -> dict[str, Any] | None:
+        if not self.session:
+            return None
+        return {
+            "id": self.session["sub2api_user_id"],
+            "email": self.session["email"],
+            "username": self.session["username"],
+        }
+
+
 def create_app(
     settings: Settings | None = None,
     provider: OpenAICompatibleImageClient | None = None,
+    auth_client: Sub2APIAuthClient | None = None,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     settings.ensure_directories()
@@ -63,16 +111,18 @@ def create_app(
                 except asyncio.CancelledError:
                     pass
 
-    app = FastAPI(title="CyberGen Backend", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="CyberGen Backend", version="2.0.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.state.provider = provider or OpenAICompatibleImageClient(settings.request_timeout_seconds)
+    app.state.auth_client = auth_client or Sub2APIAuthClient(settings.request_timeout_seconds)
     app.state.inspiration_task = None
     app.state.last_inspiration_sync = None
     app.state.last_inspiration_sync_error = None
     app.dependency_overrides[_db] = lambda: app.state.db
     app.dependency_overrides[_settings] = lambda: app.state.settings
     app.dependency_overrides[_provider] = lambda: app.state.provider
+    app.dependency_overrides[_auth_client] = lambda: app.state.auth_client
 
     app.add_middleware(
         CORSMiddleware,
@@ -83,11 +133,37 @@ def create_app(
     )
     app.mount("/storage", StaticFiles(directory=settings.storage_dir), name="storage")
 
+    @app.middleware("http")
+    async def attach_viewer(request: Request, call_next):
+        request.state.clear_session_cookie = False
+        guest_id = request.cookies.get(settings.guest_cookie_name) or uuid4().hex
+        request.state.guest_id = guest_id
+        request.state.guest_owner_id = f"guest:{guest_id}"
+        request.state.viewer_session = None
+        request.state.viewer_owner_id = request.state.guest_owner_id
+
+        session_id = request.cookies.get(settings.session_cookie_name)
+        if session_id:
+            session = db.get_session(session_id)
+            if session is None:
+                request.state.clear_session_cookie = True
+            else:
+                db.touch_session(session_id, settings.session_ttl_seconds)
+                request.state.viewer_session = session
+                request.state.viewer_owner_id = session["owner_id"]
+
+        response = await call_next(request)
+        _set_guest_cookie(response, settings, guest_id)
+        if request.state.clear_session_cookie:
+            response.delete_cookie(settings.session_cookie_name, path="/")
+        return response
+
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         return {
             "ok": True,
-            "sub2api_base_url": app.state.db.get_config()["base_url"],
+            "sub2api_base_url": settings.provider_base_url,
+            "sub2api_auth_base_url": settings.auth_base_url,
             "detected": {
                 "sub2api": "http://127.0.0.1:9878",
                 "cli_proxy_api": "http://127.0.0.1:8389",
@@ -96,65 +172,223 @@ def create_app(
             "last_inspiration_sync_error": app.state.last_inspiration_sync_error,
         }
 
+    @app.get("/api/auth/public-settings")
+    async def auth_public_settings(auth_client: Sub2APIAuthClient = Depends(_auth_client)) -> dict[str, Any]:
+        try:
+            return await auth_client.public_settings(settings.auth_base_url)
+        except ProviderError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    @app.get("/api/auth/session")
+    async def auth_session(
+        viewer: ViewerContext = Depends(_viewer),
+        db: Database = Depends(_db),
+        settings: Settings = Depends(_settings),
+    ) -> dict[str, Any]:
+        config = db.get_config(viewer.owner_id, settings, user_name=_viewer_name(viewer, settings))
+        return _viewer_payload(viewer, config)
+
+    @app.post("/api/auth/send-verify-code")
+    async def auth_send_verify_code(
+        payload: AuthSendVerifyCodeRequest,
+        auth_client: Sub2APIAuthClient = Depends(_auth_client),
+    ) -> dict[str, Any]:
+        try:
+            body = payload.model_dump(exclude_none=True)
+            return await auth_client.send_verify_code(settings.auth_base_url, body)
+        except ProviderError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    @app.post("/api/auth/register")
+    async def auth_register(
+        payload: AuthRegisterRequest,
+        request: Request,
+        response: Response,
+        db: Database = Depends(_db),
+        settings: Settings = Depends(_settings),
+        auth_client: Sub2APIAuthClient = Depends(_auth_client),
+    ) -> dict[str, Any]:
+        try:
+            result = await auth_client.register(settings.auth_base_url, payload.model_dump(exclude_none=True))
+            viewer_payload = await _complete_auth_flow(
+                db,
+                settings,
+                auth_client,
+                request,
+                response,
+                result,
+            )
+            return {"ok": True, "viewer": viewer_payload}
+        except ProviderError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    @app.post("/api/auth/login")
+    async def auth_login(
+        payload: AuthLoginRequest,
+        request: Request,
+        response: Response,
+        db: Database = Depends(_db),
+        settings: Settings = Depends(_settings),
+        auth_client: Sub2APIAuthClient = Depends(_auth_client),
+    ) -> dict[str, Any]:
+        try:
+            result = await auth_client.login(settings.auth_base_url, payload.model_dump(exclude_none=True))
+            if isinstance(result, dict) and result.get("requires_2fa"):
+                return {
+                    "ok": True,
+                    "requires_2fa": True,
+                    "temp_token": result.get("temp_token"),
+                    "user_email_masked": result.get("user_email_masked"),
+                }
+            viewer_payload = await _complete_auth_flow(
+                db,
+                settings,
+                auth_client,
+                request,
+                response,
+                result,
+            )
+            return {"ok": True, "viewer": viewer_payload}
+        except ProviderError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    @app.post("/api/auth/login/2fa")
+    async def auth_login_2fa(
+        payload: AuthLogin2FARequest,
+        request: Request,
+        response: Response,
+        db: Database = Depends(_db),
+        settings: Settings = Depends(_settings),
+        auth_client: Sub2APIAuthClient = Depends(_auth_client),
+    ) -> dict[str, Any]:
+        try:
+            result = await auth_client.login_2fa(settings.auth_base_url, payload.model_dump(exclude_none=True))
+            viewer_payload = await _complete_auth_flow(
+                db,
+                settings,
+                auth_client,
+                request,
+                response,
+                result,
+            )
+            return {"ok": True, "viewer": viewer_payload}
+        except ProviderError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    @app.post("/api/auth/logout")
+    async def auth_logout(
+        response: Response,
+        request: Request,
+        db: Database = Depends(_db),
+        settings: Settings = Depends(_settings),
+    ) -> dict[str, Any]:
+        session_id = request.cookies.get(settings.session_cookie_name)
+        if session_id:
+            db.delete_session(session_id)
+        response.delete_cookie(settings.session_cookie_name, path="/")
+        request.state.guest_id = uuid4().hex
+        request.state.guest_owner_id = f"guest:{request.state.guest_id}"
+        return {"ok": True}
+
     @app.get("/api/config")
-    async def get_config(db: Database = Depends(_db)) -> dict[str, Any]:
-        return _public_config(db.get_config())
+    async def get_config(
+        viewer: ViewerContext = Depends(_viewer),
+        db: Database = Depends(_db),
+        settings: Settings = Depends(_settings),
+    ) -> dict[str, Any]:
+        return _public_config(
+            db.get_config(viewer.owner_id, settings, user_name=_viewer_name(viewer, settings)),
+            viewer,
+        )
 
     @app.put("/api/config")
-    async def update_config(payload: ConfigUpdate, db: Database = Depends(_db)) -> dict[str, Any]:
+    async def update_config(
+        payload: ConfigUpdate,
+        viewer: ViewerContext = Depends(_viewer),
+        db: Database = Depends(_db),
+        settings: Settings = Depends(_settings),
+    ) -> dict[str, Any]:
         updates = payload.model_dump(exclude_unset=True)
         clear_api_key = bool(updates.pop("clear_api_key", False))
+        if viewer.authenticated:
+            locked = {"api_key", "base_url", "usage_path", "user_name", "managed_by_auth"}
+            if clear_api_key or locked.intersection(updates):
+                raise HTTPException(status_code=403, detail="Signed-in accounts use Sub2API-managed configuration")
         if clear_api_key:
             updates["api_key"] = ""
         elif "api_key" in updates and updates["api_key"] == "":
             updates.pop("api_key")
         if "base_url" in updates and updates["base_url"]:
             updates["base_url"] = updates["base_url"].rstrip("/")
-        config = db.update_config(updates)
-        return _public_config(config)
+        config = db.update_config(viewer.owner_id, settings, updates)
+        return _public_config(config, viewer)
 
     @app.post("/api/config/test")
     async def test_config(
+        viewer: ViewerContext = Depends(_viewer),
         db: Database = Depends(_db),
+        settings: Settings = Depends(_settings),
         provider: OpenAICompatibleImageClient = Depends(_provider),
     ) -> dict[str, Any]:
         try:
-            return await provider.test_connection(db.get_config())
+            config = db.get_config(viewer.owner_id, settings, user_name=_viewer_name(viewer, settings))
+            return await provider.test_connection(config)
         except ProviderError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
     @app.get("/api/account")
     async def account(
+        viewer: ViewerContext = Depends(_viewer),
         db: Database = Depends(_db),
+        settings: Settings = Depends(_settings),
         provider: OpenAICompatibleImageClient = Depends(_provider),
     ) -> dict[str, Any]:
-        config = db.get_config()
+        config = db.get_config(viewer.owner_id, settings, user_name=_viewer_name(viewer, settings))
         usage = await _safe_usage(provider, config)
         return {
+            "viewer": _viewer_payload(viewer, config),
             "user": {
                 "name": config["user_name"],
+                "email": viewer.user["email"] if viewer.user else None,
+                "username": viewer.user["username"] if viewer.user else None,
+                "authenticated": viewer.authenticated,
+                "guest": not viewer.authenticated,
                 "api_key_set": bool(config["api_key"]),
+                "api_key_source": "managed" if config["managed_by_auth"] else "manual",
                 "model": config["model"],
                 "base_url": config["base_url"],
             },
             "balance": usage,
-            "stats": db.stats(),
+            "stats": db.stats(viewer.owner_id),
         }
 
     @app.get("/api/balance")
     async def balance(
+        viewer: ViewerContext = Depends(_viewer),
         db: Database = Depends(_db),
+        settings: Settings = Depends(_settings),
         provider: OpenAICompatibleImageClient = Depends(_provider),
     ) -> dict[str, Any]:
-        return await _safe_usage(provider, db.get_config())
+        config = db.get_config(viewer.owner_id, settings, user_name=_viewer_name(viewer, settings))
+        return await _safe_usage(provider, config)
 
     @app.get("/api/ledger")
-    async def ledger(limit: int = 20, db: Database = Depends(_db)) -> dict[str, Any]:
-        return {"items": db.list_ledger(limit)}
+    async def ledger(
+        limit: int = 20,
+        viewer: ViewerContext = Depends(_viewer),
+        db: Database = Depends(_db),
+    ) -> dict[str, Any]:
+        return {"items": db.list_ledger(viewer.owner_id, limit)}
 
     @app.get("/api/history")
-    async def history(limit: int = 30, offset: int = 0, q: str = "", db: Database = Depends(_db)) -> dict[str, Any]:
-        return {"items": db.list_history(limit=limit, offset=offset, q=q)}
+    async def history(
+        limit: int = 30,
+        offset: int = 0,
+        q: str = "",
+        viewer: ViewerContext = Depends(_viewer),
+        db: Database = Depends(_db),
+    ) -> dict[str, Any]:
+        return {"items": db.list_history(viewer.owner_id, limit=limit, offset=offset, q=q)}
 
     @app.get("/api/inspirations")
     async def inspirations(
@@ -191,15 +425,23 @@ def create_app(
             raise HTTPException(status_code=502, detail=f"Inspiration sync failed: {exc}") from exc
 
     @app.get("/api/history/{history_id}")
-    async def history_detail(history_id: str, db: Database = Depends(_db)) -> dict[str, Any]:
-        record = db.get_history(history_id)
+    async def history_detail(
+        history_id: str,
+        viewer: ViewerContext = Depends(_viewer),
+        db: Database = Depends(_db),
+    ) -> dict[str, Any]:
+        record = db.get_history(viewer.owner_id, history_id)
         if record is None:
             raise HTTPException(status_code=404, detail="History item not found")
         return record
 
     @app.delete("/api/history/{history_id}")
-    async def delete_history(history_id: str, db: Database = Depends(_db)) -> dict[str, Any]:
-        deleted = db.delete_history(history_id)
+    async def delete_history(
+        history_id: str,
+        viewer: ViewerContext = Depends(_viewer),
+        db: Database = Depends(_db),
+    ) -> dict[str, Any]:
+        deleted = db.delete_history(viewer.owner_id, history_id)
         if not deleted:
             raise HTTPException(status_code=404, detail="History item not found")
         return {"ok": True}
@@ -207,17 +449,19 @@ def create_app(
     @app.post("/api/images/generate")
     async def generate_image(
         request: GenerateRequest,
+        viewer: ViewerContext = Depends(_viewer),
         db: Database = Depends(_db),
         settings: Settings = Depends(_settings),
         provider: OpenAICompatibleImageClient = Depends(_provider),
     ) -> dict[str, Any]:
-        config = db.get_config()
+        config = db.get_config(viewer.owner_id, settings, user_name=_viewer_name(viewer, settings))
         payload = _image_payload(config, request)
         try:
             response = await provider.generate_image(config, payload)
             records = await _persist_image_response(
                 db,
                 settings,
+                owner_id=viewer.owner_id,
                 mode="generate",
                 prompt=request.prompt,
                 model=payload["model"],
@@ -227,10 +471,10 @@ def create_app(
             )
             return {"items": records, "provider": {"created": response.get("created"), "usage": response.get("usage")}}
         except ProviderError as exc:
-            _record_failed_history(db, "generate", request.prompt, payload, exc.message, exc.payload)
+            _record_failed_history(db, viewer.owner_id, "generate", request.prompt, payload, exc.message, exc.payload)
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
         except Exception as exc:
-            _record_failed_history(db, "generate", request.prompt, payload, str(exc), None)
+            _record_failed_history(db, viewer.owner_id, "generate", request.prompt, payload, str(exc), None)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.post("/api/images/edit")
@@ -242,11 +486,12 @@ def create_app(
         size: Annotated[str | None, Form()] = None,
         quality: Annotated[str | None, Form()] = None,
         n: Annotated[int, Form(ge=1, le=4)] = 1,
+        viewer: ViewerContext = Depends(_viewer),
         db: Database = Depends(_db),
         settings: Settings = Depends(_settings),
         provider: OpenAICompatibleImageClient = Depends(_provider),
     ) -> dict[str, Any]:
-        config = db.get_config()
+        config = db.get_config(viewer.owner_id, settings, user_name=_viewer_name(viewer, settings))
         saved_uploads = [await save_upload(settings, upload) for upload in image]
         saved_mask = await save_upload(settings, mask) if mask else None
         fields = {
@@ -270,6 +515,7 @@ def create_app(
             records = await _persist_image_response(
                 db,
                 settings,
+                owner_id=viewer.owner_id,
                 mode="edit",
                 prompt=prompt,
                 model=fields["model"],
@@ -281,10 +527,10 @@ def create_app(
             )
             return {"items": records, "provider": {"created": response.get("created"), "usage": response.get("usage")}}
         except ProviderError as exc:
-            _record_failed_history(db, "edit", prompt, fields, exc.message, exc.payload)
+            _record_failed_history(db, viewer.owner_id, "edit", prompt, fields, exc.message, exc.payload)
             raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
         except Exception as exc:
-            _record_failed_history(db, "edit", prompt, fields, str(exc), None)
+            _record_failed_history(db, viewer.owner_id, "edit", prompt, fields, str(exc), None)
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return app
@@ -302,16 +548,56 @@ def _provider() -> OpenAICompatibleImageClient:
     raise RuntimeError("Dependency should be overridden by FastAPI")
 
 
-def _public_config(config: dict[str, Any]) -> dict[str, Any]:
+def _auth_client() -> Sub2APIAuthClient:
+    raise RuntimeError("Dependency should be overridden by FastAPI")
+
+
+def _viewer(request: Request) -> ViewerContext:
+    session = getattr(request.state, "viewer_session", None)
+    guest_id = getattr(request.state, "guest_id", uuid4().hex)
+    guest_owner_id = getattr(request.state, "guest_owner_id", f"guest:{guest_id}")
+    return ViewerContext(
+        owner_id=getattr(request.state, "viewer_owner_id", guest_owner_id),
+        guest_owner_id=guest_owner_id,
+        guest_id=guest_id,
+        authenticated=session is not None,
+        session_id=session["id"] if session else None,
+        session=session,
+    )
+
+
+def _viewer_name(viewer: ViewerContext, settings: Settings) -> str:
+    if viewer.user:
+        return viewer.user.get("username") or viewer.user.get("email") or settings.user_name
+    return settings.user_name
+
+
+def _public_config(config: dict[str, Any], viewer: ViewerContext) -> dict[str, Any]:
+    managed = bool(config.get("managed_by_auth"))
     return {
+        "owner_id": config["owner_id"],
         "base_url": config["base_url"],
         "usage_path": config["usage_path"],
         "model": config["model"],
         "default_size": config["default_size"],
         "default_quality": config["default_quality"],
         "user_name": config["user_name"],
+        "managed_by_auth": managed,
         "api_key_set": bool(config["api_key"]),
         "api_key_hint": _mask_key(config["api_key"]),
+        "api_key_editable": not managed,
+        "base_url_editable": not managed,
+        "authenticated": viewer.authenticated,
+    }
+
+
+def _viewer_payload(viewer: ViewerContext, config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "authenticated": viewer.authenticated,
+        "owner_id": viewer.owner_id,
+        "guest_id": viewer.guest_id,
+        "api_key_source": "managed" if config.get("managed_by_auth") else "manual",
+        "user": viewer.user,
     }
 
 
@@ -321,6 +607,139 @@ def _mask_key(api_key: str) -> str:
     if len(api_key) <= 10:
         return f"{api_key[:2]}***{api_key[-2:]}"
     return f"{api_key[:6]}...{api_key[-4:]}"
+
+
+def _set_guest_cookie(response: Response, settings: Settings, guest_id: str) -> None:
+    response.set_cookie(
+        settings.guest_cookie_name,
+        guest_id,
+        max_age=settings.guest_ttl_seconds,
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_secure,
+        path="/",
+    )
+
+
+def _set_session_cookie(response: Response, settings: Settings, session_id: str) -> None:
+    response.set_cookie(
+        settings.session_cookie_name,
+        session_id,
+        max_age=settings.session_ttl_seconds,
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_secure,
+        path="/",
+    )
+
+
+async def _complete_auth_flow(
+    db: Database,
+    settings: Settings,
+    auth_client: Sub2APIAuthClient,
+    request: Request,
+    response: Response,
+    auth_result: dict[str, Any],
+) -> dict[str, Any]:
+    access_token = str(auth_result.get("access_token") or "").strip()
+    user = auth_result.get("user")
+    if not access_token or not isinstance(user, dict):
+        raise HTTPException(status_code=502, detail="Sub2API login response was missing user credentials")
+
+    user_id = int(user["id"])
+    owner_id = f"user:{user_id}"
+    display_name = str(user.get("username") or user.get("email") or f"user-{user_id}")
+    api_key = await _resolve_user_api_key(auth_client, settings, access_token)
+
+    db.merge_owner_data(
+        request.state.guest_owner_id,
+        owner_id,
+        settings,
+        user_name=display_name,
+    )
+    config = db.apply_managed_config(owner_id, settings, api_key=api_key, user_name=display_name)
+    session = db.create_session(
+        owner_id=owner_id,
+        sub2api_user_id=user_id,
+        email=str(user.get("email") or ""),
+        username=str(user.get("username") or ""),
+        ttl_seconds=settings.session_ttl_seconds,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=_client_ip(request),
+    )
+    new_guest_id = uuid4().hex
+    request.state.guest_id = new_guest_id
+    request.state.guest_owner_id = f"guest:{new_guest_id}"
+    _set_session_cookie(response, settings, session["id"])
+    return _viewer_payload(
+        ViewerContext(
+            owner_id=owner_id,
+            guest_owner_id=request.state.guest_owner_id,
+            guest_id=request.state.guest_id,
+            authenticated=True,
+            session_id=session["id"],
+            session=session,
+        ),
+        config,
+    )
+
+
+async def _resolve_user_api_key(
+    auth_client: Sub2APIAuthClient,
+    settings: Settings,
+    access_token: str,
+) -> str:
+    keys = await auth_client.list_keys(settings.auth_base_url, access_token)
+    selected = _select_existing_key(keys)
+    if selected and selected.get("key"):
+        return str(selected["key"])
+
+    groups = await auth_client.list_available_groups(settings.auth_base_url, access_token)
+    selected_group = _select_openai_group(groups)
+    payload: dict[str, Any] = {"name": "cybergen-image"}
+    if selected_group is not None:
+        payload["group_id"] = selected_group
+    created = await auth_client.create_key(settings.auth_base_url, access_token, payload)
+    key = str(created.get("key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=502, detail="Sub2API did not return a usable API key")
+    return key
+
+
+def _select_existing_key(keys: list[dict[str, Any]]) -> dict[str, Any] | None:
+    def sort_key(item: dict[str, Any]) -> tuple[int, int]:
+        status = 0 if item.get("status") == "active" else 1
+        platform = 0 if ((item.get("group") or {}).get("platform") == "openai") else 1
+        return status, platform
+
+    candidates = [item for item in keys if isinstance(item.get("key"), str) and item.get("key")]
+    if not candidates:
+        return None
+    return sorted(candidates, key=sort_key)[0]
+
+
+def _select_openai_group(groups: list[dict[str, Any]]) -> int | None:
+    ranked: list[tuple[int, int]] = []
+    for item in groups:
+        group_id = item.get("id")
+        if not isinstance(group_id, int):
+            continue
+        status_rank = 0 if item.get("status") == "active" else 1
+        platform_rank = 0 if item.get("platform") == "openai" else 1
+        ranked.append((status_rank * 10 + platform_rank, group_id))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda item: item[0])
+    return ranked[0][1]
+
+
+def _client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",", 1)[0].strip()
+    if request.client:
+        return request.client.host
+    return None
 
 
 def _image_payload(config: dict[str, Any], request: GenerateRequest) -> dict[str, Any]:
@@ -343,6 +762,7 @@ async def _persist_image_response(
     db: Database,
     settings: Settings,
     *,
+    owner_id: str,
     mode: str,
     prompt: str,
     model: str,
@@ -363,6 +783,7 @@ async def _persist_image_response(
         history_id = uuid4().hex
         saved = await save_provider_image(settings, history_id, item)
         record = db.create_history(
+            owner_id,
             {
                 "id": history_id,
                 "mode": mode,
@@ -378,16 +799,17 @@ async def _persist_image_response(
                 "revised_prompt": item.get("revised_prompt"),
                 "usage": provider_response.get("usage"),
                 "provider_response": {"created": provider_response.get("created"), "source_url": saved.get("source_url")},
-            }
+            },
         )
         db.add_ledger_entry(
+            owner_id,
             {
                 "event_type": mode,
                 "amount": 0,
                 "description": f"{mode.upper()} {model}",
                 "history_id": record["id"],
                 "metadata": {"size": size, "quality": quality},
-            }
+            },
         )
         records.append(record)
     if not records:
@@ -397,6 +819,7 @@ async def _persist_image_response(
 
 def _record_failed_history(
     db: Database,
+    owner_id: str,
     mode: str,
     prompt: str,
     payload: dict[str, Any],
@@ -404,6 +827,7 @@ def _record_failed_history(
     provider_response: Any | None,
 ) -> None:
     db.create_history(
+        owner_id,
         {
             "mode": mode,
             "prompt": prompt,
@@ -413,7 +837,7 @@ def _record_failed_history(
             "status": "failed",
             "error": message,
             "provider_response": provider_response,
-        }
+        },
     )
 
 
