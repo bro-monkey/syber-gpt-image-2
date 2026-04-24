@@ -3,10 +3,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Loader2, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { PublicAuthSettings, getAuthPublicSettings, loginAccount, loginAccount2FA } from '../api';
 import { useAuth } from '../auth';
+import { useSite } from '../site';
 
 export default function Login() {
   const navigate = useNavigate();
   const { viewer, setViewer } = useAuth();
+  const { t } = useSite();
   const [settings, setSettings] = useState<PublicAuthSettings | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -64,15 +66,15 @@ export default function Login() {
     <div className="px-6 py-24 max-w-[640px] mx-auto min-h-screen flex items-center">
       <section className="w-full border border-primary/25 bg-black/70 p-8 md:p-10 shadow-[0_0_40px_rgba(0,243,255,0.08)]">
         <div className="text-[10px] text-secondary uppercase tracking-widest font-bold mb-3">
-          {settings?.site_name || 'CYBERGEN'} Access
+          {settings?.site_name || 'CYBERGEN'} {t('login_access')}
         </div>
         <h1 className="text-3xl md:text-4xl font-black text-white mb-3 uppercase">
-          {tempToken ? 'Two-Factor Check' : 'Sign In'}
+          {tempToken ? t('login_title_2fa') : t('login_title')}
         </h1>
         <p className="text-sm text-white/50 mb-8">
           {tempToken
-            ? `Enter the 6-digit code for ${maskedEmail}.`
-            : 'Use your sub2api account. The image site keeps its own session cookie and binds your personal API key automatically.'}
+            ? t('login_desc_2fa', { value: maskedEmail })
+            : t('login_desc')}
         </p>
 
         {error && (
@@ -84,17 +86,17 @@ export default function Login() {
         <form className="space-y-5" onSubmit={handleSubmit}>
           {!tempToken && (
             <>
-              <Field label="Email">
+              <Field label={t('login_email')}>
                 <input className="input-cyber" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
               </Field>
-              <Field label="Password">
+              <Field label={t('login_password')}>
                 <input className="input-cyber" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
               </Field>
             </>
           )}
 
           {tempToken && (
-            <Field label="TOTP Code">
+            <Field label={t('login_totp')}>
               <input
                 className="input-cyber tracking-[0.35em] text-center"
                 inputMode="numeric"
@@ -111,14 +113,14 @@ export default function Login() {
             type="submit"
           >
             {loading ? <Loader2 className="animate-spin" size={16} /> : tempToken ? <ShieldCheck size={16} /> : <LockKeyhole size={16} />}
-            {tempToken ? 'Verify 2FA' : 'Sign In'}
+            {tempToken ? t('login_submit_2fa') : t('login_submit')}
           </button>
         </form>
 
         <div className="mt-6 pt-6 border-t border-white/10 text-xs text-white/50 flex items-center justify-between gap-4">
-          <span>New account?</span>
+          <span>{t('login_new')}</span>
           <Link className="text-primary uppercase tracking-widest hover:text-secondary" to="/register">
-            Register
+            {t('top_register')}
           </Link>
         </div>
       </section>

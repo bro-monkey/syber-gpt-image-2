@@ -66,6 +66,13 @@ class AuthLogin2FARequest(BaseModel):
     totp_code: str = Field(min_length=6, max_length=6)
 
 
+class SiteSettingsUpdate(BaseModel):
+    default_locale: str | None = None
+    announcement_enabled: bool | None = None
+    announcement_title: str | None = Field(default=None, max_length=120)
+    announcement_body: str | None = Field(default=None, max_length=12000)
+
+
 @dataclass
 class ViewerContext:
     owner_id: str
@@ -83,7 +90,13 @@ class ViewerContext:
             "id": self.session["sub2api_user_id"],
             "email": self.session["email"],
             "username": self.session["username"],
+            "role": self.session["role"],
         }
+
+    @property
+    def is_admin(self) -> bool:
+        user = self.user
+        return bool(user and user.get("role") == "admin")
 
 
 PREFERRED_IMAGE_GROUP_NAME = "gpt-image-2"
@@ -190,6 +203,22 @@ def create_app(
     ) -> dict[str, Any]:
         config = db.get_config(viewer.owner_id, settings, user_name=_viewer_name(viewer, settings))
         return _viewer_payload(viewer, config)
+
+    @app.get("/api/site-settings")
+    async def get_site_settings(
+        viewer: ViewerContext = Depends(_viewer),
+        db: Database = Depends(_db),
+    ) -> dict[str, Any]:
+        return _public_site_settings(db.get_site_settings(), viewer)
+
+    @app.put("/api/site-settings")
+    async def update_site_settings(
+        payload: SiteSettingsUpdate,
+        viewer: ViewerContext = Depends(_viewer),
+        db: Database = Depends(_db),
+    ) -> dict[str, Any]:
+        _require_admin(viewer)
+        return _public_site_settings(db.update_site_settings(payload.model_dump(exclude_none=True)), viewer)
 
     @app.post("/api/auth/send-verify-code")
     async def auth_send_verify_code(
@@ -355,6 +384,7 @@ def create_app(
                 "name": config["user_name"],
                 "email": viewer.user["email"] if viewer.user else None,
                 "username": viewer.user["username"] if viewer.user else None,
+                "role": viewer.user["role"] if viewer.user else None,
                 "authenticated": viewer.authenticated,
                 "guest": not viewer.authenticated,
                 "api_key_set": bool(config["api_key"]),
@@ -575,6 +605,29 @@ def _viewer_name(viewer: ViewerContext, settings: Settings) -> str:
     return settings.user_name
 
 
+def _require_admin(viewer: ViewerContext) -> None:
+    if not viewer.authenticated:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not viewer.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+def _public_site_settings(settings_data: dict[str, Any], viewer: ViewerContext) -> dict[str, Any]:
+    return {
+        "default_locale": settings_data["default_locale"],
+        "announcement": {
+            "enabled": bool(settings_data["announcement_enabled"]),
+            "title": settings_data["announcement_title"],
+            "body": settings_data["announcement_body"],
+            "updated_at": settings_data["announcement_updated_at"],
+        },
+        "viewer": {
+            "authenticated": viewer.authenticated,
+            "is_admin": viewer.is_admin,
+        },
+    }
+
+
 def _public_config(config: dict[str, Any], viewer: ViewerContext) -> dict[str, Any]:
     managed = bool(config.get("managed_by_auth"))
     return {
@@ -664,6 +717,7 @@ async def _complete_auth_flow(
         sub2api_user_id=user_id,
         email=str(user.get("email") or ""),
         username=str(user.get("username") or ""),
+        role=str(user.get("role") or "user"),
         ttl_seconds=settings.session_ttl_seconds,
         user_agent=request.headers.get("user-agent"),
         ip_address=_client_ip(request),

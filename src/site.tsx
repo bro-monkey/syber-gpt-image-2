@@ -1,0 +1,399 @@
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { getSiteSettings, SiteSettings } from './api';
+import { useAuth } from './auth';
+
+type Locale = 'zh-CN' | 'en-US';
+type TranslationKey = keyof typeof translations['zh-CN'];
+
+type SiteContextValue = {
+  locale: Locale;
+  setLocale: (locale: Locale) => void;
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string;
+  siteSettings: SiteSettings | null;
+  refreshSiteSettings: () => Promise<void>;
+  announcementOpen: boolean;
+  openAnnouncement: () => void;
+  closeAnnouncement: () => void;
+};
+
+const LOCALE_STORAGE_KEY = 'cybergen_locale';
+const ANNOUNCEMENT_SEEN_KEY = 'cybergen_announcement_seen_at';
+
+const translations = {
+  'zh-CN': {
+    top_history: '历史记录',
+    top_register: '注册',
+    top_owner: '当前身份',
+    top_credits: '余额',
+    top_ledger: '账单',
+    top_logout: '退出登录',
+    top_login: '登录',
+    top_announcement: '公告',
+    side_title: '神经链接',
+    side_history: '生成历史',
+    side_account: '账户概览',
+    side_config: '系统设置',
+    side_billing: '账单明细',
+    side_generate: '开始生成',
+    home_scan: '系统扫描',
+    home_title: '灵感图库',
+    home_owner: '当前身份 {value}',
+    home_guest: '游客 {value}',
+    home_clone_prompt: '复用提示词',
+    home_mode: '模式',
+    home_mode_edit: '改图',
+    home_mode_generate: '生图',
+    home_message_edit_sent: '改图请求已发送',
+    home_message_generate_sent: '生图请求已发送',
+    home_message_saved: '结果已存入历史',
+    home_message_waiting: '等待输入',
+    home_message_loaded: '已载入配置',
+    home_placeholder: '在这里输入你的生成提示词...',
+    home_ref_image: '参考图',
+    home_execute: '执行',
+    home_edit: '改图',
+    home_generate: '生成',
+    history_tag: '神经数据库',
+    history_title: '历史档案',
+    history_subtitle: '查看并管理此前生成的图像记录。',
+    history_search: '搜索提示词...',
+    history_failed: '生成失败',
+    history_download: '下载',
+    history_delete: '删除',
+    history_preview: '预览',
+    history_regenerate: '重新生成',
+    history_load_more: '加载更多',
+    account_tag: '个人系统',
+    account_title: '账户',
+    account_identity: '身份信息',
+    account_owner: '身份',
+    account_registered: '注册用户',
+    account_guest: '游客会话',
+    account_user: '显示名称',
+    account_sub2api_username: 'Sub2API 用户名',
+    account_email: '邮箱',
+    account_model: '模型',
+    account_api_key: '密钥来源',
+    account_api_managed: '自动绑定到 Sub2API 用户',
+    account_api_override: '手动覆盖密钥',
+    account_api_manual: '游客手动密钥',
+    account_api_missing: '未配置',
+    account_balance: '余额',
+    account_history: '历史数',
+    account_succeeded: '{value} 次成功',
+    account_edits: '改图数',
+    account_last: '最近：{value}',
+    billing_tag: '账单',
+    billing_title: '余额明细',
+    billing_remaining: 'Sub2API 剩余额度',
+    billing_synced: '已从 /v1/usage 同步',
+    billing_not_configured: '未配置 API Key',
+    billing_local_ledger: '本地账单',
+    billing_empty: '暂无账单数据',
+    config_profile: '用户资料',
+    config_mode: '模式',
+    config_mode_user: 'Sub2API 用户',
+    config_mode_guest: '游客',
+    config_balance: '余额：{value}',
+    config_guest_tip: '游客模式使用手动填写的 Sub2API API Key。注册或登录后，会自动绑定你的个人 Key。',
+    config_sign_in: '登录',
+    config_register: '注册',
+    config_title: '运行配置',
+    config_session_user: '账号会话',
+    config_session_guest: '游客会话',
+    config_user_desc: '当前配置绑定到已登录的 Sub2API 用户。系统会自动选择个人 Key，必要时你也可以改为共享福利 Key。',
+    config_guest_desc: '游客模式按浏览器 Cookie 隔离数据，使用手动保存的 Sub2API API Key，后端会自动转发到内部生图服务。',
+    config_cases: '案例库',
+    config_cases_summary: '已同步 {total} 条案例 · 最近 {time}',
+    config_sync_cases: '同步案例',
+    config_user_name: '用户名',
+    config_model: '模型',
+    config_size: '尺寸',
+    config_quality: '质量',
+    config_api_key: 'Sub2API 密钥',
+    config_saved_key: '已保存密钥：{value}',
+    config_key_managed: '自动绑定',
+    config_key_override: '手动覆盖',
+    config_key_manual: '手动',
+    config_restore_key: '恢复自动绑定密钥',
+    config_test: '测试连接',
+    config_save: '保存配置',
+    config_ledger: '消费矩阵',
+    config_ledger_empty: '暂无本地账单',
+    config_view_ledger: '查看完整账单',
+    config_status_saved: '配置已保存',
+    config_status_connected: '连接正常：{value}',
+    config_status_synced: '已同步 {value} 条案例',
+    config_status_restored: '已恢复自动绑定密钥',
+    config_status_site_saved: '站点设置已保存',
+    config_site_title: '界面与公告',
+    config_site_desc: '语言选择会保存在当前浏览器。管理员保存后，会更新站点默认语言与公告内容。',
+    login_access: '访问入口',
+    login_title: '登录',
+    login_title_2fa: '二次验证',
+    login_desc: '使用你的 Sub2API 账户登录。本站会维护自己的会话，并自动绑定你的个人 API Key。',
+    login_desc_2fa: '请输入 {value} 的 6 位验证码。',
+    login_email: '邮箱',
+    login_password: '密码',
+    login_totp: 'TOTP 验证码',
+    login_submit: '登录',
+    login_submit_2fa: '验证 2FA',
+    login_new: '还没有账号？',
+    register_access: '注册入口',
+    register_title: '创建账户',
+    register_desc: '注册入口在本站，但账号实际创建在你部署的 Sub2API 中。',
+    register_disabled: '当前连接的 Sub2API 已关闭注册。',
+    register_email: '邮箱',
+    register_password: '密码',
+    register_verify_code: '验证码',
+    register_send_code: '发送验证码',
+    register_promo: '优惠码',
+    register_invitation: '邀请码',
+    register_submit: '注册',
+    register_exists: '已经注册？',
+    lang_label: '界面语言',
+    lang_zh: '中文',
+    lang_en: 'English',
+    site_announcement: '站点公告',
+    site_announcement_enabled: '启用公告弹窗',
+    site_announcement_title: '公告标题',
+    site_announcement_body: '公告内容',
+    site_announcement_save: '保存公告',
+    site_settings_save: '保存站点设置',
+    site_admin_only: '仅管理员可编辑站点语言和公告。',
+    announcement_empty: '当前没有公告内容。',
+    modal_close: '关闭',
+    modal_preview: '图片预览',
+    modal_open_image: '打开原图',
+  },
+  'en-US': {
+    top_history: 'History',
+    top_register: 'Register',
+    top_owner: 'Owner',
+    top_credits: 'Credits',
+    top_ledger: 'Ledger',
+    top_logout: 'Logout',
+    top_login: 'Login',
+    top_announcement: 'Announcement',
+    side_title: 'Neural Link',
+    side_history: 'Generation History',
+    side_account: 'Account Overview',
+    side_config: 'System Settings',
+    side_billing: 'Billing',
+    side_generate: 'Generate New',
+    home_scan: 'System Scan',
+    home_title: 'Inspiration Feed',
+    home_owner: 'Owner {value}',
+    home_guest: 'Guest {value}',
+    home_clone_prompt: 'Clone Prompt',
+    home_mode: 'Mode',
+    home_mode_edit: 'Edit',
+    home_mode_generate: 'Generate',
+    home_message_edit_sent: 'Edit request dispatched',
+    home_message_generate_sent: 'Generation request dispatched',
+    home_message_saved: 'Result stored in archive',
+    home_message_waiting: 'Awaiting input',
+    home_message_loaded: 'Selected configuration loaded',
+    home_placeholder: 'Enter your prompt here...',
+    home_ref_image: 'Ref Image',
+    home_execute: 'Execute',
+    home_edit: 'Edit',
+    home_generate: 'Generate',
+    history_tag: 'Neural Database',
+    history_title: 'Archive',
+    history_subtitle: 'Access and manage previously synthesized visual records.',
+    history_search: 'Search prompts...',
+    history_failed: 'Generation failed',
+    history_download: 'Download',
+    history_delete: 'Delete',
+    history_preview: 'Preview',
+    history_regenerate: 'Re-Generate',
+    history_load_more: 'Load More',
+    account_tag: 'Personal System',
+    account_title: 'Account',
+    account_identity: 'Identity',
+    account_owner: 'Owner',
+    account_registered: 'Registered User',
+    account_guest: 'Guest Session',
+    account_user: 'Display Name',
+    account_sub2api_username: 'Sub2API Username',
+    account_email: 'Email',
+    account_model: 'Model',
+    account_api_key: 'API Key',
+    account_api_managed: 'Bound to Sub2API user',
+    account_api_override: 'Manual override key',
+    account_api_manual: 'Manual guest key',
+    account_api_missing: 'Missing',
+    account_balance: 'Balance',
+    account_history: 'History',
+    account_succeeded: '{value} succeeded',
+    account_edits: 'Edits',
+    account_last: 'Last: {value}',
+    billing_tag: 'Billing',
+    billing_title: 'Balance',
+    billing_remaining: 'Sub2API Remaining',
+    billing_synced: 'Synced from /v1/usage',
+    billing_not_configured: 'API key not configured',
+    billing_local_ledger: 'Local Ledger',
+    billing_empty: 'No ledger data',
+    config_profile: 'Owner Profile',
+    config_mode: 'Mode',
+    config_mode_user: 'Sub2API User',
+    config_mode_guest: 'Guest',
+    config_balance: 'Balance: {value}',
+    config_guest_tip: 'Guest sessions use a manual Sub2API API key. Register or sign in to bind a per-user key automatically.',
+    config_sign_in: 'Sign In',
+    config_register: 'Register',
+    config_title: 'Runtime Binding',
+    config_session_user: 'Managed Account Session',
+    config_session_guest: 'Guest Session',
+    config_user_desc: 'This config is attached to the signed-in Sub2API user. The personal API key is selected automatically, and you can override it with a shared or welfare key when needed.',
+    config_guest_desc: 'Guest mode keeps data isolated by guest cookie. This mode uses a manually saved Sub2API API key, and the backend routes requests to the internal image service.',
+    config_cases: 'Prompt Case Source',
+    config_cases_summary: '{total} cases synced · last {time}',
+    config_sync_cases: 'Sync Cases',
+    config_user_name: 'User Name',
+    config_model: 'Model',
+    config_size: 'Size',
+    config_quality: 'Quality',
+    config_api_key: 'Sub2API Key',
+    config_saved_key: 'Saved key: {value}',
+    config_key_managed: 'managed',
+    config_key_override: 'manual override',
+    config_key_manual: 'manual',
+    config_restore_key: 'Restore managed key',
+    config_test: 'Test Link',
+    config_save: 'Save Config',
+    config_ledger: 'Consumption Matrix',
+    config_ledger_empty: 'No local ledger',
+    config_view_ledger: 'View Full Ledger',
+    config_status_saved: 'Config saved',
+    config_status_connected: 'Connected: {value}',
+    config_status_synced: 'Synced {value} cases',
+    config_status_restored: 'Restored managed key',
+    config_status_site_saved: 'Site settings saved',
+    config_site_title: 'Interface & Announcement',
+    config_site_desc: 'Language selection is stored in the current browser. When an admin saves, it also becomes the site default along with the announcement.',
+    login_access: 'Access',
+    login_title: 'Sign In',
+    login_title_2fa: 'Two-Factor Check',
+    login_desc: 'Use your Sub2API account. This site keeps its own session cookie and binds your personal API key automatically.',
+    login_desc_2fa: 'Enter the 6-digit code for {value}.',
+    login_email: 'Email',
+    login_password: 'Password',
+    login_totp: 'TOTP Code',
+    login_submit: 'Sign In',
+    login_submit_2fa: 'Verify 2FA',
+    login_new: 'New account?',
+    register_access: 'Enrollment',
+    register_title: 'Create Account',
+    register_desc: 'Registration happens from this image site, but the account source is your deployed Sub2API instance.',
+    register_disabled: 'Registration is disabled on the connected Sub2API service.',
+    register_email: 'Email',
+    register_password: 'Password',
+    register_verify_code: 'Verify Code',
+    register_send_code: 'Send Code',
+    register_promo: 'Promo Code',
+    register_invitation: 'Invitation Code',
+    register_submit: 'Register',
+    register_exists: 'Already registered?',
+    lang_label: 'Language',
+    lang_zh: '中文',
+    lang_en: 'English',
+    site_announcement: 'Announcement',
+    site_announcement_enabled: 'Enable popup announcement',
+    site_announcement_title: 'Announcement title',
+    site_announcement_body: 'Announcement body',
+    site_announcement_save: 'Save Announcement',
+    site_settings_save: 'Save Site Settings',
+    site_admin_only: 'Only admins can edit language and announcements.',
+    announcement_empty: 'No announcement available.',
+    modal_close: 'Close',
+    modal_preview: 'Image Preview',
+    modal_open_image: 'Open Original',
+  },
+} as const;
+
+const SiteContext = createContext<SiteContextValue | null>(null);
+
+export function SiteProvider({ children }: { children: ReactNode }) {
+  const { viewer } = useAuth();
+  const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(null);
+  const [locale, setLocaleState] = useState<Locale>('zh-CN');
+  const [announcementOpen, setAnnouncementOpen] = useState(false);
+
+  async function refreshSiteSettings() {
+    try {
+      const next = await getSiteSettings();
+      setSiteSettings(next);
+      const storedLocale = window.localStorage.getItem(LOCALE_STORAGE_KEY) as Locale | null;
+      if (storedLocale === 'zh-CN' || storedLocale === 'en-US') {
+        setLocaleState(storedLocale);
+      } else if (next.default_locale === 'en-US' || next.default_locale === 'zh-CN') {
+        setLocaleState(next.default_locale);
+      } else {
+        setLocaleState('zh-CN');
+      }
+    } catch {
+      setSiteSettings(null);
+      setLocaleState('zh-CN');
+    }
+  }
+
+  useEffect(() => {
+    refreshSiteSettings().catch(() => undefined);
+  }, [viewer?.owner_id]);
+
+  useEffect(() => {
+    if (!siteSettings?.announcement.enabled || !siteSettings.announcement.updated_at) {
+      return;
+    }
+    const seenAt = window.localStorage.getItem(ANNOUNCEMENT_SEEN_KEY);
+    if (seenAt !== siteSettings.announcement.updated_at) {
+      setAnnouncementOpen(true);
+    }
+  }, [siteSettings?.announcement.enabled, siteSettings?.announcement.updated_at]);
+
+  function setLocale(nextLocale: Locale) {
+    setLocaleState(nextLocale);
+    window.localStorage.setItem(LOCALE_STORAGE_KEY, nextLocale);
+  }
+
+  function openAnnouncement() {
+    setAnnouncementOpen(true);
+  }
+
+  function closeAnnouncement() {
+    setAnnouncementOpen(false);
+    const updatedAt = siteSettings?.announcement.updated_at;
+    if (updatedAt) {
+      window.localStorage.setItem(ANNOUNCEMENT_SEEN_KEY, updatedAt);
+    }
+  }
+
+  const value = useMemo<SiteContextValue>(() => ({
+    locale,
+    setLocale,
+    t: (key, vars) => {
+      const template = translations[locale][key] || translations['zh-CN'][key] || key;
+      if (!vars) return template;
+      return Object.entries(vars).reduce((result, [name, value]) => result.replace(`{${name}}`, String(value)), template);
+    },
+    siteSettings,
+    refreshSiteSettings,
+    announcementOpen,
+    openAnnouncement,
+    closeAnnouncement,
+  }), [locale, siteSettings, announcementOpen]);
+
+  return <SiteContext.Provider value={value}>{children}</SiteContext.Provider>;
+}
+
+export function useSite() {
+  const context = useContext(SiteContext);
+  if (!context) {
+    throw new Error('useSite must be used inside SiteProvider');
+  }
+  return context;
+}

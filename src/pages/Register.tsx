@@ -3,10 +3,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Loader2, MailPlus, Send } from 'lucide-react';
 import { PublicAuthSettings, getAuthPublicSettings, registerAccount, sendVerifyCode } from '../api';
 import { useAuth } from '../auth';
+import { useSite } from '../site';
 
 export default function Register() {
   const navigate = useNavigate();
   const { viewer, setViewer } = useAuth();
+  const { t } = useSite();
   const [settings, setSettings] = useState<PublicAuthSettings | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -80,11 +82,11 @@ export default function Register() {
     <div className="px-6 py-24 max-w-[760px] mx-auto min-h-screen flex items-center">
       <section className="w-full border border-primary/25 bg-black/70 p-8 md:p-10 shadow-[0_0_40px_rgba(255,0,255,0.08)]">
         <div className="text-[10px] text-secondary uppercase tracking-widest font-bold mb-3">
-          {settings?.site_name || 'CYBERGEN'} Enrollment
+          {settings?.site_name || 'CYBERGEN'} {t('register_access')}
         </div>
-        <h1 className="text-3xl md:text-4xl font-black text-white mb-3 uppercase">Create Account</h1>
+        <h1 className="text-3xl md:text-4xl font-black text-white mb-3 uppercase">{t('register_title')}</h1>
         <p className="text-sm text-white/50 mb-8">
-          Registration happens from this image site, but the account source is your deployed sub2api instance.
+          {t('register_desc')}
         </p>
 
         {(error || status) && (
@@ -95,22 +97,22 @@ export default function Register() {
 
         {!canRegister && (
           <div className="border border-error/40 bg-error/10 p-4 text-xs text-error">
-            Registration is disabled on the connected sub2api service.
+            {t('register_disabled')}
           </div>
         )}
 
         <form className="space-y-5 mt-6" onSubmit={handleSubmit}>
-          <Field label="Email">
+          <Field label={t('register_email')}>
             <input className="input-cyber" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
           </Field>
 
-          <Field label="Password">
+          <Field label={t('register_password')}>
             <input className="input-cyber" type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
           </Field>
 
           {settings?.email_verify_enabled && (
             <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
-              <Field label="Verify Code">
+              <Field label={t('register_verify_code')}>
                 <input className="input-cyber" value={verifyCode} onChange={(event) => setVerifyCode(event.target.value)} />
               </Field>
               <button
@@ -120,19 +122,19 @@ export default function Register() {
                 onClick={handleSendCode}
               >
                 {sendingCode ? <Loader2 className="animate-spin" size={14} /> : <Send size={14} />}
-                {countdown > 0 ? `${countdown}s` : 'Send Code'}
+                {countdown > 0 ? `${countdown}s` : t('register_send_code')}
               </button>
             </div>
           )}
 
           {settings?.promo_code_enabled && (
-            <Field label="Promo Code">
+            <Field label={t('register_promo')}>
               <input className="input-cyber" value={promoCode} onChange={(event) => setPromoCode(event.target.value)} />
             </Field>
           )}
 
           {settings?.invitation_code_enabled && (
-            <Field label="Invitation Code">
+            <Field label={t('register_invitation')}>
               <input className="input-cyber" value={invitationCode} onChange={(event) => setInvitationCode(event.target.value)} />
             </Field>
           )}
@@ -143,14 +145,14 @@ export default function Register() {
             type="submit"
           >
             {loading ? <Loader2 className="animate-spin" size={16} /> : <MailPlus size={16} />}
-            Register
+            {t('register_submit')}
           </button>
         </form>
 
         <div className="mt-6 pt-6 border-t border-white/10 text-xs text-white/50 flex items-center justify-between gap-4">
-          <span>Already registered?</span>
+          <span>{t('register_exists')}</span>
           <Link className="text-primary uppercase tracking-widest hover:text-secondary" to="/login">
-            Sign In
+            {t('login_submit')}
           </Link>
         </div>
       </section>

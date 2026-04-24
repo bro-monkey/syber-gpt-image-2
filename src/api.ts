@@ -9,6 +9,7 @@ export type ViewerInfo = {
     id: number;
     email: string;
     username: string;
+    role: string;
   } | null;
 };
 
@@ -85,6 +86,7 @@ export type AccountInfo = {
     name: string;
     email: string | null;
     username: string | null;
+    role: string | null;
     authenticated: boolean;
     guest: boolean;
     api_key_set: boolean;
@@ -134,6 +136,20 @@ export type PublicAuthSettings = {
   site_subtitle: string;
 };
 
+export type SiteSettings = {
+  default_locale: 'zh-CN' | 'en-US' | string;
+  announcement: {
+    enabled: boolean;
+    title: string;
+    body: string;
+    updated_at: string | null;
+  };
+  viewer: {
+    authenticated: boolean;
+    is_admin: boolean;
+  };
+};
+
 export type LoginResult = {
   ok: boolean;
   viewer?: ViewerInfo;
@@ -162,6 +178,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export function getSession() {
   return request<ViewerInfo>('/api/auth/session');
+}
+
+export function getSiteSettings() {
+  return request<SiteSettings>('/api/site-settings');
+}
+
+export function updateSiteSettings(payload: {
+  default_locale?: 'zh-CN' | 'en-US';
+  announcement_enabled?: boolean;
+  announcement_title?: string;
+  announcement_body?: string;
+}) {
+  return request<SiteSettings>('/api/site-settings', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getAuthPublicSettings() {

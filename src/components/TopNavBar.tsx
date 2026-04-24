@@ -1,13 +1,15 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { LogOut } from 'lucide-react';
+import { Bell, LogOut } from 'lucide-react';
 import { AccountInfo, formatBalance, getAccount, logoutAccount } from '../api';
 import { useAuth } from '../auth';
+import { useSite } from '../site';
 import AvatarBadge from './AvatarBadge';
 
 export default function TopNavBar() {
   const location = useLocation();
   const { viewer, refresh } = useAuth();
+  const { siteSettings, openAnnouncement, t } = useSite();
   const [account, setAccount] = useState<AccountInfo | null>(null);
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export default function TopNavBar() {
 
   const viewerLabel = viewer?.authenticated
     ? (viewer.user?.username || viewer.user?.email || 'USER')
-    : `Guest ${viewer?.guest_id?.slice(0, 8) || '--'}`;
+    : t('home_guest', { value: viewer?.guest_id?.slice(0, 8) || '--' });
 
   return (
     <header className="fixed top-0 left-0 w-full z-[100] flex justify-between items-center px-6 h-16 bg-surface-bright border-b border-primary/30 shadow-[0_0_20px_rgba(0,243,255,0.1)] shrink-0 font-mono">
@@ -47,7 +49,7 @@ export default function TopNavBar() {
               location.pathname === '/history' ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant'
             }`}
           >
-            History
+            {t('top_history')}
           </Link>
           {!viewer?.authenticated && (
             <Link
@@ -56,7 +58,7 @@ export default function TopNavBar() {
                 location.pathname === '/register' ? 'text-primary border-b-2 border-primary' : 'text-on-surface-variant'
               }`}
             >
-              Register
+              {t('top_register')}
             </Link>
           )}
         </nav>
@@ -64,17 +66,27 @@ export default function TopNavBar() {
       <div className="flex items-center gap-4 md:gap-6">
         <div className="hidden md:flex items-center gap-4">
           <div className="flex flex-col items-end">
-            <span className="text-[10px] uppercase text-on-surface-variant">Owner</span>
+            <span className="text-[10px] uppercase text-on-surface-variant">{t('top_owner')}</span>
             <span className="text-xs text-tertiary">{viewerLabel}</span>
           </div>
           <div className="h-10 px-4 bg-surface-container-highest border border-primary/20 flex items-center gap-3 rounded-tr-xl">
-            <span className="text-xs uppercase text-on-surface-variant">Credits</span>
+            <span className="text-xs uppercase text-on-surface-variant">{t('top_credits')}</span>
             <span className="font-bold text-lg text-secondary">⚡ {formatBalance(account?.balance)}</span>
             <Link to="/billing" className="ml-2 px-3 py-1 bg-secondary text-white text-[10px] font-bold uppercase hover:bg-secondary/80 transition-colors shadow-[0_0_10px_rgba(255,0,255,0.3)]">
-              Ledger
+              {t('top_ledger')}
             </Link>
           </div>
         </div>
+
+        <button
+          className="relative flex h-10 w-10 items-center justify-center border border-primary/20 text-primary transition-colors hover:bg-primary/10"
+          type="button"
+          onClick={openAnnouncement}
+          title={t('top_announcement')}
+        >
+          <Bell size={16} />
+          {siteSettings?.announcement.enabled ? <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-secondary" /> : null}
+        </button>
 
         {viewer?.authenticated ? (
           <button
@@ -83,15 +95,15 @@ export default function TopNavBar() {
             onClick={handleLogout}
           >
             <LogOut size={14} />
-            Logout
+            {t('top_logout')}
           </button>
         ) : (
           <div className="flex items-center gap-2">
             <Link className="h-10 px-4 border border-primary/30 text-primary text-[10px] uppercase tracking-widest hover:bg-primary/10 transition-colors flex items-center" to="/login">
-              Login
+              {t('top_login')}
             </Link>
             <Link className="h-10 px-4 bg-secondary text-white text-[10px] font-bold uppercase tracking-widest hover:bg-white hover:text-black transition-colors flex items-center" to="/register">
-              Register
+              {t('top_register')}
             </Link>
           </div>
         )}

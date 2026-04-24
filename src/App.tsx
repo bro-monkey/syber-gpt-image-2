@@ -8,11 +8,13 @@ import Account from './pages/Account';
 import Billing from './pages/Billing';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import AnnouncementModal from './components/AnnouncementModal';
 
 export default function App() {
   return (
     <div className="min-h-screen bg-background text-on-background font-mono overflow-x-hidden selection:bg-secondary-container selection:text-secondary">
       <TopNavBar />
+      <AnnouncementModal />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/history" element={

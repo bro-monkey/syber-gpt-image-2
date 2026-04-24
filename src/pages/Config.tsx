@@ -1,6 +1,6 @@
 import { FormEvent, ReactNode, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, ArrowRight, EyeOff, Loader2, PlugZap, Save, Server, ShieldAlert } from 'lucide-react';
+import { Activity, ArrowRight, BellRing, EyeOff, Globe2, Loader2, PlugZap, Save, Server, ShieldAlert } from 'lucide-react';
 import {
   AccountInfo,
   AppConfig,
@@ -15,20 +15,41 @@ import {
   saveConfig,
   syncInspirations,
   testConfig,
+  updateSiteSettings,
 } from '../api';
 import { useAuth } from '../auth';
 import AvatarBadge from '../components/AvatarBadge';
+import { useSite } from '../site';
+
+type LocaleValue = 'zh-CN' | 'en-US';
+
+function normalizeLocale(locale: string | undefined): LocaleValue {
+  return locale === 'en-US' ? 'en-US' : 'zh-CN';
+}
 
 export default function Config() {
   const { viewer } = useAuth();
+  const { setLocale, siteSettings, refreshSiteSettings, t } = useSite();
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [inspirationStats, setInspirationStats] = useState<InspirationStats | null>(null);
+  const [siteDraft, setSiteDraft] = useState<{
+    default_locale: LocaleValue;
+    announcement_enabled: boolean;
+    announcement_title: string;
+    announcement_body: string;
+  }>({
+    default_locale: 'zh-CN',
+    announcement_enabled: false,
+    announcement_title: '',
+    announcement_body: '',
+  });
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [siteSaving, setSiteSaving] = useState(false);
 
   async function refresh() {
     const [configData, accountData, ledgerData, inspirationData] = await Promise.all([
@@ -47,6 +68,23 @@ export default function Config() {
     refresh().catch((err) => setError(err.message));
   }, [viewer?.owner_id]);
 
+  useEffect(() => {
+    if (!siteSettings) {
+      return;
+    }
+    setSiteDraft({
+      default_locale: normalizeLocale(siteSettings.default_locale),
+      announcement_enabled: siteSettings.announcement.enabled,
+      announcement_title: siteSettings.announcement.title,
+      announcement_body: siteSettings.announcement.body,
+    });
+  }, [
+    siteSettings?.default_locale,
+    siteSettings?.announcement.enabled,
+    siteSettings?.announcement.title,
+    siteSettings?.announcement.body,
+  ]);
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!config) return;
@@ -64,7 +102,7 @@ export default function Config() {
       setConfig(updated);
       setApiKey('');
       await refresh();
-      setStatus('CONFIG SAVED');
+      setStatus(t('config_status_saved'));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -78,7 +116,7 @@ export default function Config() {
     setStatus('');
     try {
       const result = await testConfig();
-      setStatus(`CONNECTED: ${result.models.slice(0, 3).join(', ') || 'MODELS OK'}`);
+      setStatus(t('config_status_connected', { value: result.models.slice(0, 3).join(', ') || 'MODELS OK' }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -93,7 +131,7 @@ export default function Config() {
     try {
       const result = await syncInspirations();
       await refresh();
-      setStatus(`SYNCED ${result.parsed} CASES`);
+      setStatus(t('config_status_synced', { value: result.parsed }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -111,12 +149,39 @@ export default function Config() {
       setConfig(updated);
       setApiKey('');
       await refresh();
-      setStatus('RESTORED MANAGED KEY');
+      setStatus(t('config_status_restored'));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleSaveSiteSettings() {
+    if (!siteSettings?.viewer.is_admin) return;
+    setSiteSaving(true);
+    setError('');
+    setStatus('');
+    try {
+      const updated = await updateSiteSettings({
+        default_locale: siteDraft.default_locale,
+        announcement_enabled: siteDraft.announcement_enabled,
+        announcement_title: siteDraft.announcement_title.trim(),
+        announcement_body: siteDraft.announcement_body.trim(),
+      });
+      setLocale(normalizeLocale(updated.default_locale));
+      await refreshSiteSettings();
+      setStatus(t('config_status_site_saved'));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSiteSaving(false);
+    }
+  }
+
+  function handleLocaleChange(nextLocale: LocaleValue) {
+    setLocale(nextLocale);
+    setSiteDraft((current) => ({ ...current, default_locale: nextLocale }));
   }
 
   return (
@@ -135,19 +200,19 @@ export default function Config() {
         </div>
         <div className="flex flex-col gap-1">
           <div className="text-[10px] text-secondary uppercase font-bold tracking-widest flex items-center gap-2">
-            <span className="w-4 h-[1px] bg-secondary"></span> Owner Profile
+            <span className="w-4 h-[1px] bg-secondary"></span> {t('config_profile')}
           </div>
           <h1 className="text-3xl md:text-5xl text-on-surface font-bold">{config?.user_name || 'NEON_USER_404'}</h1>
           <div className="flex items-center gap-4 text-xs mt-2 border border-white/10 bg-white/5 py-1 px-3 w-fit">
             <span className="text-white/50 uppercase">
-              Mode:{' '}
+              {t('config_mode')}:{' '}
               <span className={config?.managed_by_auth ? 'text-tertiary' : 'text-primary'}>
-                {config?.managed_by_auth ? 'Sub2API User' : 'Guest'}
+                {config?.managed_by_auth ? t('config_mode_user') : t('config_mode_guest')}
               </span>
             </span>
             <span className="text-white/20">|</span>
             <span className="text-primary uppercase flex items-center gap-1">
-              <span className="w-1.5 h-1.5 bg-primary rounded-full"></span> Balance: {formatBalance(account?.balance)}
+              <span className="w-1.5 h-1.5 bg-primary rounded-full"></span> {t('config_balance', { value: formatBalance(account?.balance) })}
             </span>
           </div>
         </div>
@@ -161,13 +226,13 @@ export default function Config() {
 
       {!config?.managed_by_auth && (
         <div className="mb-6 border border-primary/20 bg-primary/5 p-4 text-xs text-white/60 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-          <div>Guest sessions use manual Sub2API API keys. Register or sign in to bind a per-user key automatically.</div>
+          <div>{t('config_guest_tip')}</div>
           <div className="flex gap-3">
             <Link className="border border-primary/40 px-4 py-2 text-primary uppercase tracking-widest hover:bg-primary/10" to="/login">
-              Sign In
+              {t('config_sign_in')}
             </Link>
             <Link className="border border-secondary/40 px-4 py-2 text-secondary uppercase tracking-widest hover:bg-secondary/10" to="/register">
-              Register
+              {t('config_register')}
             </Link>
           </div>
         </div>
@@ -179,27 +244,25 @@ export default function Config() {
 
           <h2 className="text-xl text-primary mb-8 uppercase flex items-center gap-3 font-bold border-b border-primary/20 pb-4">
             <Server className="text-primary" size={20} />
-            Runtime Binding
+            {t('config_title')}
           </h2>
 
           <div className="bg-primary/5 border border-primary/20 border-l-2 border-l-tertiary p-5 mb-8 flex gap-4 relative">
             <ShieldAlert className="text-tertiary mt-1 shrink-0" size={20} />
             <div>
               <h3 className="text-white mb-1 font-bold tracking-widest text-[10px] uppercase">
-                {config?.managed_by_auth ? 'Managed Account Session' : 'Guest Session'}
+                {config?.managed_by_auth ? t('config_session_user') : t('config_session_guest')}
               </h3>
               <p className="text-white/50 text-xs leading-relaxed">
-                {config?.managed_by_auth
-                  ? 'This config is attached to the signed-in Sub2API user. The personal API key is selected automatically, and you can override it with a shared or welfare key when needed.'
-                  : 'Guest mode keeps data isolated by guest cookie. This mode uses a manually saved Sub2API API key, and the backend routes requests to the internal image service.'}
+                {config?.managed_by_auth ? t('config_user_desc') : t('config_guest_desc')}
               </p>
             </div>
           </div>
 
           <div className="bg-secondary/5 border border-secondary/20 p-4 mb-8 text-xs text-white/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <div className="text-secondary uppercase tracking-widest text-[10px] mb-1">Prompt Case Source</div>
-              <div>{inspirationStats?.total ?? 0} cases synced · last {formatDate(inspirationStats?.last_synced_at)}</div>
+              <div className="text-secondary uppercase tracking-widest text-[10px] mb-1">{t('config_cases')}</div>
+              <div>{t('config_cases_summary', { total: inspirationStats?.total ?? 0, time: formatDate(inspirationStats?.last_synced_at) })}</div>
             </div>
             <button
               className="border border-secondary/40 text-secondary px-4 py-2 uppercase tracking-widest hover:bg-secondary/10 transition-colors disabled:opacity-50"
@@ -207,12 +270,12 @@ export default function Config() {
               onClick={handleSyncInspirations}
               disabled={saving}
             >
-              SYNC CASES
+              {t('config_sync_cases')}
             </button>
           </div>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-            <Field label="USER_NAME">
+            <Field label={t('config_user_name')}>
               <input
                 className="input-cyber"
                 disabled={config?.managed_by_auth}
@@ -222,10 +285,10 @@ export default function Config() {
             </Field>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Field label="MODEL">
+              <Field label={t('config_model')}>
                 <input className="input-cyber" value={config?.model || 'gpt-image-2'} onChange={(event) => setConfig((current) => current && { ...current, model: event.target.value })} />
               </Field>
-              <Field label="SIZE">
+              <Field label={t('config_size')}>
                 <select className="input-cyber" value={config?.default_size || '1024x1024'} onChange={(event) => setConfig((current) => current && { ...current, default_size: event.target.value })}>
                   <option>1024x1024</option>
                   <option>1024x1536</option>
@@ -233,7 +296,7 @@ export default function Config() {
                   <option>auto</option>
                 </select>
               </Field>
-              <Field label="QUALITY">
+              <Field label={t('config_quality')}>
                 <select className="input-cyber" value={config?.default_quality || 'medium'} onChange={(event) => setConfig((current) => current && { ...current, default_quality: event.target.value })}>
                   <option>low</option>
                   <option>medium</option>
@@ -244,7 +307,7 @@ export default function Config() {
             </div>
 
             <div className="flex flex-col gap-2 relative">
-              <label className="text-secondary text-[10px] uppercase tracking-widest font-bold mb-1" htmlFor="api_key">SUB2API_KEY</label>
+              <label className="text-secondary text-[10px] uppercase tracking-widest font-bold mb-1" htmlFor="api_key">{t('config_api_key')}</label>
               <div className="relative">
                 <input
                   className="input-cyber pr-12"
@@ -259,12 +322,12 @@ export default function Config() {
                 </button>
               </div>
               <span className="text-[9px] text-white/30 text-right uppercase">
-                Saved key: {config?.api_key_set ? config.api_key_hint : 'NONE'}{' '}
+                {t('config_saved_key', { value: config?.api_key_set ? config.api_key_hint : 'NONE' })}{' '}
                 {config?.api_key_source === 'managed'
-                  ? '(managed)'
+                  ? `(${t('config_key_managed')})`
                   : config?.api_key_source === 'manual_override'
-                    ? '(manual override)'
-                    : '(manual)'}
+                    ? `(${t('config_key_override')})`
+                    : `(${t('config_key_manual')})`}
               </span>
               {config?.managed_by_auth && config?.api_key_source === 'manual_override' && (
                 <button
@@ -272,7 +335,7 @@ export default function Config() {
                   type="button"
                   onClick={handleResetKey}
                 >
-                  Restore managed key
+                  {t('config_restore_key')}
                 </button>
               )}
             </div>
@@ -285,7 +348,7 @@ export default function Config() {
                 disabled={saving}
               >
                 <PlugZap size={14} />
-                TEST LINK
+                {t('config_test')}
               </button>
               <button
                 className="bg-secondary text-white font-bold px-8 py-3 uppercase tracking-widest hover:bg-white hover:text-black transition-colors flex items-center justify-center gap-2 text-xs shadow-[0_0_15px_rgba(255,0,255,0.3)] disabled:opacity-50"
@@ -293,21 +356,97 @@ export default function Config() {
                 disabled={saving}
               >
                 {saving ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
-                SAVE CONFIG
+                {t('config_save')}
               </button>
             </div>
           </form>
         </div>
 
         <div className="col-span-12 lg:col-span-4 flex flex-col gap-6">
+          <div className="bg-black border border-white/10 p-6 relative">
+            <h3 className="text-primary mb-6 uppercase flex items-center gap-2 font-bold tracking-wider text-[10px] border-b border-primary/20 pb-4">
+              <Globe2 size={16} />
+              {t('config_site_title')}
+            </h3>
+
+            <p className="mb-5 text-xs leading-6 text-white/50">{t('config_site_desc')}</p>
+
+            <div className="space-y-5">
+              <Field label={t('lang_label')}>
+                <select
+                  className="input-cyber"
+                  value={siteDraft.default_locale}
+                  onChange={(event) => handleLocaleChange(event.target.value as LocaleValue)}
+                >
+                  <option value="zh-CN">{t('lang_zh')}</option>
+                  <option value="en-US">{t('lang_en')}</option>
+                </select>
+              </Field>
+
+              <div className="border border-secondary/20 bg-secondary/5 p-4">
+                <div className="mb-4 flex items-center gap-2 text-[10px] uppercase tracking-widest text-secondary">
+                  <BellRing size={15} />
+                  {t('site_announcement')}
+                </div>
+
+                <label className="mb-4 flex items-center gap-3 text-xs text-white/70">
+                  <input
+                    className="h-4 w-4 accent-secondary"
+                    type="checkbox"
+                    checked={siteDraft.announcement_enabled}
+                    disabled={!siteSettings?.viewer.is_admin}
+                    onChange={(event) => setSiteDraft((current) => ({ ...current, announcement_enabled: event.target.checked }))}
+                  />
+                  {t('site_announcement_enabled')}
+                </label>
+
+                <div className="space-y-4">
+                  <Field label={t('site_announcement_title')}>
+                    <input
+                      className="input-cyber"
+                      disabled={!siteSettings?.viewer.is_admin}
+                      value={siteDraft.announcement_title}
+                      onChange={(event) => setSiteDraft((current) => ({ ...current, announcement_title: event.target.value }))}
+                    />
+                  </Field>
+
+                  <Field label={t('site_announcement_body')}>
+                    <textarea
+                      className="input-cyber min-h-32 resize-y"
+                      disabled={!siteSettings?.viewer.is_admin}
+                      value={siteDraft.announcement_body}
+                      onChange={(event) => setSiteDraft((current) => ({ ...current, announcement_body: event.target.value }))}
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              {siteSettings?.viewer.is_admin ? (
+                <button
+                  className="w-full bg-secondary text-white font-bold px-6 py-3 uppercase tracking-widest hover:bg-white hover:text-black transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-xs"
+                  type="button"
+                  onClick={handleSaveSiteSettings}
+                  disabled={siteSaving}
+                >
+                  {siteSaving ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
+                  {t('site_settings_save')}
+                </button>
+              ) : (
+                <div className="border border-primary/20 bg-primary/5 p-4 text-xs text-white/60">
+                  {t('site_admin_only')}
+                </div>
+              )}
+            </div>
+          </div>
+
           <div className="bg-black border border-white/10 p-6 relative flex-1">
             <h3 className="text-primary mb-6 uppercase flex items-center gap-2 font-bold tracking-wider text-[10px] border-b border-primary/20 pb-4">
               <Activity size={16} />
-              Consumption Matrix
+              {t('config_ledger')}
             </h3>
 
             <div className="flex flex-col gap-0 text-xs">
-              {ledger.length === 0 && <div className="py-6 text-white/40 uppercase">NO LOCAL LEDGER</div>}
+              {ledger.length === 0 && <div className="py-6 text-white/40 uppercase">{t('config_ledger_empty')}</div>}
               {ledger.map((item) => (
                 <div key={item.id} className="flex justify-between items-center py-3 border-b border-white/5">
                   <div className="flex flex-col">
@@ -320,7 +459,7 @@ export default function Config() {
             </div>
 
             <Link to="/billing" className="w-full mt-6 py-2 border border-primary/30 text-primary text-[10px] uppercase tracking-widest hover:bg-primary/10 transition-colors flex items-center justify-center gap-2">
-              VIEW FULL LEDGER <ArrowRight size={12} />
+              {t('config_view_ledger')} <ArrowRight size={12} />
             </Link>
           </div>
         </div>

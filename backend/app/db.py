@@ -97,11 +97,23 @@ class Database:
                     sub2api_user_id INTEGER NOT NULL,
                     email TEXT NOT NULL,
                     username TEXT NOT NULL DEFAULT '',
+                    role TEXT NOT NULL DEFAULT 'user',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     expires_at TEXT NOT NULL,
                     user_agent TEXT,
                     ip_address TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS site_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    default_locale TEXT NOT NULL DEFAULT 'zh-CN',
+                    announcement_enabled INTEGER NOT NULL DEFAULT 0,
+                    announcement_title TEXT NOT NULL DEFAULT '',
+                    announcement_body TEXT NOT NULL DEFAULT '',
+                    announcement_updated_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS inspiration_prompts (
@@ -141,6 +153,10 @@ class Database:
         if "managed_api_key" not in owner_config_columns:
             conn.execute("ALTER TABLE owner_config ADD COLUMN managed_api_key TEXT NOT NULL DEFAULT ''")
 
+        session_columns = _table_columns(conn, "user_sessions")
+        if session_columns and "role" not in session_columns:
+            conn.execute("ALTER TABLE user_sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+
         image_columns = _table_columns(conn, "image_history")
         if "owner_id" not in image_columns:
             conn.execute(
@@ -152,6 +168,8 @@ class Database:
             conn.execute(
                 f"ALTER TABLE ledger_entries ADD COLUMN owner_id TEXT NOT NULL DEFAULT '{LEGACY_OWNER_ID}'"
             )
+
+        self._ensure_site_settings(conn)
 
         if self._owner_config_exists(conn, LEGACY_OWNER_ID):
             return
@@ -180,6 +198,22 @@ class Database:
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
             },
+        )
+
+    def _ensure_site_settings(self, conn: sqlite3.Connection) -> None:
+        row = conn.execute("SELECT id FROM site_settings WHERE id = 1").fetchone()
+        if row is not None:
+            return
+        now = utc_now()
+        conn.execute(
+            """
+            INSERT INTO site_settings (
+                id, default_locale, announcement_enabled, announcement_title,
+                announcement_body, announcement_updated_at, created_at, updated_at
+            )
+            VALUES (1, 'zh-CN', 0, '', '', ?, ?, ?)
+            """,
+            (now, now, now),
         )
 
     def _insert_owner_config(
@@ -270,6 +304,37 @@ class Database:
             values.append(owner_id)
             conn.execute(f"UPDATE owner_config SET {assignments} WHERE owner_id = ?", values)
         return self.get_config(owner_id, settings)
+
+    def get_site_settings(self) -> dict[str, Any]:
+        with self.connect() as conn:
+            self._ensure_site_settings(conn)
+            row = conn.execute("SELECT * FROM site_settings WHERE id = 1").fetchone()
+            if row is None:
+                raise RuntimeError("site_settings was not initialized")
+            return _site_settings_row(row)
+
+    def update_site_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        allowed = {
+            "default_locale",
+            "announcement_enabled",
+            "announcement_title",
+            "announcement_body",
+            "announcement_updated_at",
+        }
+        updates = {key: value for key, value in payload.items() if key in allowed and value is not None}
+        if not updates:
+            return self.get_site_settings()
+
+        with self.connect() as conn:
+            self._ensure_site_settings(conn)
+            if any(key in updates for key in {"announcement_enabled", "announcement_title", "announcement_body"}):
+                updates["announcement_updated_at"] = utc_now()
+            updates["updated_at"] = utc_now()
+            assignments = ", ".join(f"{key} = ?" for key in updates)
+            values = list(updates.values())
+            values.append(1)
+            conn.execute(f"UPDATE site_settings SET {assignments} WHERE id = ?", values)
+        return self.get_site_settings()
 
     def apply_managed_config(
         self,
@@ -480,6 +545,7 @@ class Database:
         sub2api_user_id: int,
         email: str,
         username: str,
+        role: str,
         ttl_seconds: int,
         user_agent: str | None = None,
         ip_address: str | None = None,
@@ -491,6 +557,7 @@ class Database:
             "sub2api_user_id": sub2api_user_id,
             "email": email,
             "username": username or "",
+            "role": role or "user",
             "created_at": now,
             "updated_at": now,
             "expires_at": utc_after(ttl_seconds),
@@ -501,11 +568,11 @@ class Database:
             conn.execute(
                 """
                 INSERT INTO user_sessions (
-                    id, owner_id, sub2api_user_id, email, username,
+                    id, owner_id, sub2api_user_id, email, username, role,
                     created_at, updated_at, expires_at, user_agent, ip_address
                 )
                 VALUES (
-                    :id, :owner_id, :sub2api_user_id, :email, :username,
+                    :id, :owner_id, :sub2api_user_id, :email, :username, :role,
                     :created_at, :updated_at, :expires_at, :user_agent, :ip_address
                 )
                 """,
@@ -720,6 +787,10 @@ def _inspiration_row(row: sqlite3.Row) -> dict[str, Any]:
     data = dict(row)
     data["raw"] = _json_load(data.pop("raw_json"))
     return data
+
+
+def _site_settings_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    return dict(row)
 
 
 def _config_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:

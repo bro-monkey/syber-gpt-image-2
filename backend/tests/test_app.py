@@ -52,7 +52,7 @@ class FakeAuthClient:
             "access_token": "access-demo",
             "refresh_token": "refresh-demo",
             "token_type": "Bearer",
-            "user": {"id": 7, "email": payload["email"], "username": "demo-user"},
+            "user": {"id": 7, "email": payload["email"], "username": "demo-user", "role": "admin"},
         }
 
     async def login(self, base_url: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -60,7 +60,7 @@ class FakeAuthClient:
             "access_token": "access-demo",
             "refresh_token": "refresh-demo",
             "token_type": "Bearer",
-            "user": {"id": 7, "email": payload["email"], "username": "demo-user"},
+            "user": {"id": 7, "email": payload["email"], "username": "demo-user", "role": "admin"},
         }
 
     async def login_2fa(self, base_url: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -68,7 +68,7 @@ class FakeAuthClient:
             "access_token": "access-demo",
             "refresh_token": "refresh-demo",
             "token_type": "Bearer",
-            "user": {"id": 7, "email": "demo@example.com", "username": "demo-user"},
+            "user": {"id": 7, "email": "demo@example.com", "username": "demo-user", "role": "admin"},
         }
 
     async def list_keys(self, base_url: str, access_token: str) -> list[dict[str, Any]]:
@@ -211,6 +211,7 @@ def test_login_binds_managed_key_and_merges_guest_history(tmp_path: Path) -> Non
     assert history[0]["prompt"] == "guest prompt"
     assert account["viewer"]["user"]["email"] == "demo@example.com"
     assert account["user"]["api_key_source"] == "managed"
+    assert account["viewer"]["user"]["role"] == "admin"
 
 
 def test_signed_in_user_can_override_key_and_clear_back_to_managed(tmp_path: Path) -> None:
@@ -233,6 +234,39 @@ def test_signed_in_user_can_override_key_and_clear_back_to_managed(tmp_path: Pat
     restored_data = restored.json()
     assert restored_data["api_key_hint"] == "sk-use...3456"
     assert restored_data["api_key_source"] == "managed"
+
+
+def test_site_settings_default_to_chinese(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+
+    response = client.get("/api/site-settings")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["default_locale"] == "zh-CN"
+    assert data["announcement"]["enabled"] is False
+
+
+def test_admin_can_update_site_settings(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    login = client.post("/api/auth/login", json={"email": "demo@example.com", "password": "secret123"})
+    assert login.status_code == 200
+
+    response = client.put(
+        "/api/site-settings",
+        json={
+            "default_locale": "en-US",
+            "announcement_enabled": True,
+            "announcement_title": "系统维护通知",
+            "announcement_body": "今晚 23:00 会进行维护。",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["default_locale"] == "en-US"
+    assert data["announcement"]["enabled"] is True
+    assert data["announcement"]["title"] == "系统维护通知"
 
 
 def test_parse_inspiration_markdown() -> None:

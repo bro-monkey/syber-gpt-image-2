@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { ImagePlus, Grid, List, RefreshCw, Loader2, X } from 'lucide-react';
+import { ImagePlus, Grid, List, Maximize2, RefreshCw, Loader2, X } from 'lucide-react';
 import { editImage, generateImage, getHistory, getInspirations, HistoryItem, InspirationItem } from '../api';
 import { useAuth } from '../auth';
+import ImagePreviewModal from '../components/ImagePreviewModal';
+import { useSite } from '../site';
 
 const mockFeed = [
   {
@@ -38,10 +40,12 @@ const mockFeed = [
 
 export default function Home() {
   const { viewer } = useAuth();
+  const { t } = useSite();
   const [promptValue, setPromptValue] = useState('');
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [inspirations, setInspirations] = useState<InspirationItem[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewItem, setPreviewItem] = useState<{ imageUrl: string; prompt: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -61,14 +65,14 @@ export default function Home() {
     if (!prompt || loading) return;
     setLoading(true);
     setError('');
-    setMessage(selectedFile ? 'EDIT REQUEST DISPATCHED' : 'GENERATION REQUEST DISPATCHED');
+    setMessage(selectedFile ? t('home_message_edit_sent') : t('home_message_generate_sent'));
     try {
       const response = selectedFile
         ? await editImage({ prompt }, selectedFile)
         : await generateImage({ prompt });
       setHistory((items) => [...response.items, ...items]);
       setSelectedFile(null);
-      setMessage('RESULT STORED IN ARCHIVE');
+      setMessage(t('home_message_saved'));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setMessage('');
@@ -97,11 +101,13 @@ export default function Home() {
       <div className="flex justify-between items-end mb-8">
         <div className="flex flex-col gap-2">
            <div className="flex items-center gap-2 text-[10px] text-secondary uppercase font-bold tracking-widest">
-              <span className="w-4 h-[1px] bg-secondary"></span> System.Scan
+              <span className="w-4 h-[1px] bg-secondary"></span> {t('home_scan')}
            </div>
-          <h1 className="text-4xl md:text-5xl text-on-surface font-bold tracking-tighter">INSPIRATION_FEED</h1>
+          <h1 className="text-4xl md:text-5xl text-on-surface font-bold tracking-tighter">{t('home_title')}</h1>
           <div className="text-xs text-white/40 uppercase tracking-widest">
-            {viewer?.authenticated ? `Owner ${viewer.user?.username || viewer.user?.email}` : `Guest ${viewer?.guest_id?.slice(0, 8) || '--'}`}
+            {viewer?.authenticated
+              ? t('home_owner', { value: viewer.user?.username || viewer.user?.email || '--' })
+              : t('home_guest', { value: viewer?.guest_id?.slice(0, 8) || '--' })}
           </div>
         </div>
         <div className="hidden sm:flex gap-2">
@@ -118,13 +124,37 @@ export default function Home() {
 
       <div className="masonry-grid flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-primary/20">
         {visibleFeed.map((item, index) => (
-          <div key={`${item.id}-${index}`} className="masonry-item relative group aspect-[3/4] border border-primary/30 overflow-hidden bg-black flex flex-col">
+          <div
+            key={`${item.id}-${index}`}
+            className="masonry-item relative group aspect-[3/4] border border-primary/30 overflow-hidden bg-black flex flex-col cursor-zoom-in"
+            role="button"
+            tabIndex={0}
+            onClick={() => setPreviewItem({ imageUrl: item.img, prompt: item.prompt })}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                setPreviewItem({ imageUrl: item.img, prompt: item.prompt });
+              }
+            }}
+          >
             <img
               alt={item.id}
               className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-all duration-500"
               src={item.img}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
+
+            <button
+              className="absolute left-4 top-4 z-10 flex h-10 w-10 items-center justify-center border border-white/10 bg-black/45 text-white/70 opacity-0 backdrop-blur-sm transition-all duration-300 hover:border-primary hover:text-primary group-hover:opacity-100"
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setPreviewItem({ imageUrl: item.img, prompt: item.prompt });
+              }}
+              title={t('history_preview')}
+            >
+              <Maximize2 size={15} />
+            </button>
 
             <div className="absolute top-4 right-4 z-10 font-code-data text-white/50 text-[10px] border border-white/20 px-2 py-1 bg-black/50 backdrop-blur-sm shadow-[0_0_10px_rgba(0,0,0,0.5)]">
               {item.id}
@@ -134,11 +164,14 @@ export default function Home() {
               {'title' in item && item.title && <div className="text-[10px] text-secondary uppercase tracking-widest line-clamp-1">{item.title}</div>}
               <p className="font-body-md text-white mb-2 line-clamp-3 text-sm">{item.prompt}</p>
               <button
-                onClick={() => setPromptValue(item.prompt)}
-                className="w-full py-2 bg-primary text-black font-black text-xs uppercase shadow-[0_0_10px_rgba(0,243,255,0.5)] flex items-center justify-center gap-2 hover:bg-white hover:shadow-white/50 transition-all"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setPromptValue(item.prompt);
+                }}
+                className="pointer-events-none w-full translate-y-3 py-2 opacity-0 bg-primary text-black font-black text-xs uppercase shadow-[0_0_10px_rgba(0,243,255,0.5)] flex items-center justify-center gap-2 hover:bg-white hover:shadow-white/50 transition-all duration-300 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100"
               >
                 <RefreshCw size={14} />
-                CLONE PROMPT
+                {t('home_clone_prompt')}
               </button>
             </div>
           </div>
@@ -148,10 +181,10 @@ export default function Home() {
       <div className="fixed bottom-6 left-6 right-6 md:left-auto md:right-auto md:w-[calc(100%-3rem)] max-w-[960px] mx-auto bg-surface-container/90 backdrop-blur-xl border border-primary/40 p-5 rounded-sm shadow-[0_-20px_40px_rgba(0,0,0,0.8)] z-50 font-mono">
         <div className="flex items-center gap-4 mb-4">
           <div className="flex items-center gap-2 text-[10px] text-white/50 border-r border-white/10 pr-4">
-             <span className="w-2 h-2 bg-secondary rounded-full animate-pulse"></span> MODE: {selectedFile ? 'EDIT' : 'CREATION'}
+             <span className="w-2 h-2 bg-secondary rounded-full animate-pulse"></span> {t('home_mode')}: {selectedFile ? t('home_mode_edit') : t('home_mode_generate')}
           </div>
           <div className="text-[10px] text-primary uppercase tracking-widest truncate">
-            {message || (promptValue ? 'Selected Configuration Loaded' : 'Awaiting Input...')}
+            {message || (promptValue ? t('home_message_loaded') : t('home_message_waiting'))}
           </div>
         </div>
 
@@ -161,7 +194,7 @@ export default function Home() {
               value={promptValue}
               onChange={(e) => setPromptValue(e.target.value)}
               className="w-full h-20 bg-black border border-primary/20 p-3 text-sm text-primary focus:outline-none focus:border-primary placeholder:text-primary/20 resize-none shadow-inner"
-              placeholder="Enter your neural commands here..."
+              placeholder={t('home_placeholder')}
             ></textarea>
             <div className="absolute top-0 right-0 p-2 text-[8px] text-primary/40 uppercase">
               UTF-8 // AI-GEN // [{promptValue.length}/8000]
@@ -189,7 +222,7 @@ export default function Home() {
               ) : (
                 <>
                   <ImagePlus className="w-6 h-6 mb-1 text-white/30 group-hover:text-primary transition-colors" />
-                  <span className="text-[9px] uppercase text-white/40 group-hover:text-primary">Ref Image</span>
+                  <span className="text-[9px] uppercase text-white/40 group-hover:text-primary">{t('home_ref_image')}</span>
                 </>
               )}
             </button>
@@ -198,12 +231,19 @@ export default function Home() {
               disabled={loading || !promptValue.trim()}
               className="w-32 bg-primary text-black font-black flex flex-col items-center justify-center hover:scale-95 transition-transform shadow-[0_0_15px_rgba(0,243,255,0.4)] disabled:opacity-40 disabled:hover:scale-100"
             >
-              {loading ? <Loader2 className="animate-spin" size={24} /> : <span className="text-xl mb-[-4px]">EXECUTE</span>}
-              <span className="text-[10px] opacity-70 italic">{selectedFile ? 'EDIT' : 'GENERATE'}</span>
+              {loading ? <Loader2 className="animate-spin" size={24} /> : <span className="text-xl mb-[-4px]">{t('home_execute')}</span>}
+              <span className="text-[10px] opacity-70 italic">{selectedFile ? t('home_edit') : t('home_generate')}</span>
             </button>
           </div>
         </div>
       </div>
+
+      <ImagePreviewModal
+        imageUrl={previewItem?.imageUrl || null}
+        alt={previewItem?.prompt || 'preview'}
+        subtitle={previewItem?.prompt}
+        onClose={() => setPreviewItem(null)}
+      />
     </div>
   );
 }

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Search, Filter, Download, Trash2, RefreshCw, ArrowDown, Loader2 } from 'lucide-react';
+import { Search, Filter, Download, Trash2, RefreshCw, ArrowDown, Loader2, Maximize2 } from 'lucide-react';
 import { deleteHistory, formatDate, generateImage, getHistory, HistoryItem } from '../api';
 import { useAuth } from '../auth';
+import ImagePreviewModal from '../components/ImagePreviewModal';
+import { useSite } from '../site';
 
 const getColorClasses = (colorMode: string) => {
   if (colorMode === 'primary') {
@@ -26,9 +28,11 @@ const getColorClasses = (colorMode: string) => {
 
 export default function History() {
   const { viewer } = useAuth();
+  const { t } = useSite();
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [query, setQuery] = useState('');
   const [offset, setOffset] = useState(0);
+  const [previewItem, setPreviewItem] = useState<HistoryItem | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -73,10 +77,10 @@ export default function History() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-10 gap-6 border-b border-white/10 pb-6">
         <div className="flex flex-col gap-2">
            <div className="flex items-center gap-2 text-[10px] text-primary uppercase font-bold tracking-widest">
-              <span className="w-4 h-[1px] bg-primary"></span> Neural Database
+              <span className="w-4 h-[1px] bg-primary"></span> {t('history_tag')}
            </div>
-          <h1 className="text-4xl md:text-5xl text-on-surface font-bold tracking-tighter">ARCHIVE_</h1>
-          <p className="text-white/50 text-sm">Access and manage previously synthesized visual data structures.</p>
+          <h1 className="text-4xl md:text-5xl text-on-surface font-bold tracking-tighter">{t('history_title')}</h1>
+          <p className="text-white/50 text-sm">{t('history_subtitle')}</p>
         </div>
 
         <div className="flex gap-4 w-full md:w-auto">
@@ -89,7 +93,7 @@ export default function History() {
                 if (event.key === 'Enter') load(0, false);
               }}
               className="w-full bg-black border border-primary/20 focus:border-primary focus:ring-0 text-primary pl-10 py-2 font-code-data transition-colors placeholder:text-primary/20 outline-none text-xs shadow-inner"
-              placeholder="QUERY_LOGS..."
+              placeholder={t('history_search')}
               type="text"
             />
           </div>
@@ -116,21 +120,32 @@ export default function History() {
             {item.image_url ? (
               <img
                 alt={item.prompt}
-                className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-all duration-500"
+                className="w-full h-full cursor-zoom-in object-cover opacity-80 transition-all duration-500 group-hover:opacity-100"
                 src={item.image_url}
+                onClick={() => setPreviewItem(item)}
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-error/60 text-xs uppercase px-6 text-center">
-                {item.error || 'Generation failed'}
+                {item.error || t('history_failed')}
               </div>
             )}
 
             <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-100 flex flex-col justify-end p-5">
-               <div className="flex justify-between items-center mb-4 translate-y-8 group-hover:translate-y-0 opacity-0 group-hover:opacity-100 transition-all duration-300">
-                  <a href={item.image_url || '#'} download className="w-8 h-8 rounded-none border border-white/20 bg-white/5 flex items-center justify-center text-white hover:text-primary hover:border-primary transition-all backdrop-blur-md" title="Download">
-                    <Download size={14} />
-                  </a>
-                  <button onClick={() => handleDelete(item.id)} className="w-8 h-8 rounded-none border border-error/20 bg-error/5 flex items-center justify-center text-error hover:bg-error/20 transition-all backdrop-blur-md" title="Delete">
+               <div className="flex justify-between items-center mb-4 translate-y-8 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="w-8 h-8 rounded-none border border-white/20 bg-white/5 flex items-center justify-center text-white hover:text-primary hover:border-primary transition-all backdrop-blur-md"
+                      type="button"
+                      title={t('history_preview')}
+                      onClick={() => setPreviewItem(item)}
+                    >
+                      <Maximize2 size={14} />
+                    </button>
+                    <a href={item.image_url || '#'} download className="w-8 h-8 rounded-none border border-white/20 bg-white/5 flex items-center justify-center text-white hover:text-primary hover:border-primary transition-all backdrop-blur-md" title={t('history_download')}>
+                      <Download size={14} />
+                    </a>
+                  </div>
+                  <button onClick={() => handleDelete(item.id)} className="w-8 h-8 rounded-none border border-error/20 bg-error/5 flex items-center justify-center text-error hover:bg-error/20 transition-all backdrop-blur-md" title={t('history_delete')}>
                     <Trash2 size={14} />
                   </button>
                </div>
@@ -146,9 +161,12 @@ export default function History() {
                   </div>
                </div>
 
-               <button onClick={() => handleRegenerate(item)} className={`w-full py-3 ${colors.btnBg} ${colors.btnText} font-black text-xs uppercase flex items-center justify-center gap-2 ${colors.btnShadow} transform translate-y-12 group-hover:translate-y-0 transition-all duration-300 hover:bg-white hover:border-white shadow-white/50`}>
+               <button
+                 onClick={() => handleRegenerate(item)}
+                 className={`pointer-events-none w-full translate-y-6 py-3 opacity-0 ${colors.btnBg} ${colors.btnText} font-black text-xs uppercase flex items-center justify-center gap-2 ${colors.btnShadow} transition-all duration-300 hover:bg-white hover:border-white shadow-white/50 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100`}
+               >
                  <RefreshCw size={14} />
-                 Re-Generate
+                 {t('history_regenerate')}
                </button>
             </div>
           </div>
@@ -163,9 +181,16 @@ export default function History() {
           className="border border-primary/30 hover:border-primary text-primary px-8 py-3 uppercase tracking-widest transition-colors flex items-center gap-2 text-xs bg-primary/5 shadow-[0_0_15px_rgba(0,243,255,0.1)] disabled:opacity-50"
         >
           {loading ? <Loader2 className="animate-spin" size={14} /> : <ArrowDown size={14} />}
-          LOAD_MORE_DATA
+          {t('history_load_more')}
         </button>
       </div>
+
+      <ImagePreviewModal
+        imageUrl={previewItem?.image_url || null}
+        alt={previewItem?.prompt || 'preview'}
+        subtitle={previewItem?.prompt}
+        onClose={() => setPreviewItem(null)}
+      />
     </div>
   );
 }
