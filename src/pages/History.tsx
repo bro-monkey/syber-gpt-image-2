@@ -3,6 +3,7 @@ import { Search, Filter, Download, Trash2, RefreshCw, ArrowDown, Loader2, Maximi
 import { deleteHistory, formatDate, generateImage, getHistory, HistoryItem } from '../api';
 import { useAuth } from '../auth';
 import ImagePreviewModal from '../components/ImagePreviewModal';
+import MasonryGrid from '../components/MasonryGrid';
 import { useSite } from '../site';
 import { useTasks } from '../tasks';
 
@@ -123,74 +124,82 @@ export default function History() {
 
       {error && <div className="mb-6 border border-error/40 bg-error/10 p-4 text-error text-xs">{error}</div>}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {visibleItems.map((item, index) => {
+      <MasonryGrid
+        items={visibleItems}
+        getKey={(item) => item.id}
+        renderItem={(item, index) => {
           const colors = getColorClasses(index % 2 === 0 ? 'primary' : 'secondary');
           return (
           <div
-            key={item.id}
-            className={`group relative aspect-[4/5] bg-black border border-white/10 overflow-hidden flex flex-col ${colors.borderHover} transition-all duration-300`}
+            className={`overflow-hidden bg-black border border-white/10 ${colors.borderHover} transition-all duration-300`}
           >
-            <div className={`absolute top-3 right-3 z-10 px-2 py-1 border text-[9px] tracking-widest uppercase ${colors.textId} ${colors.bgTag} backdrop-blur-sm`}>
-              ID:{item.id.slice(0, 4).toUpperCase()}
-            </div>
-
             {item.image_url ? (
-              <img
-                alt={item.prompt}
-                className="w-full h-full cursor-zoom-in object-cover opacity-80 transition-all duration-500 group-hover:opacity-100"
-                src={item.image_url}
+              <button
+                className="block w-full cursor-zoom-in bg-black text-left"
+                type="button"
                 onClick={() => setPreviewItem(item)}
-              />
+              >
+                <img
+                  alt={item.prompt}
+                  className="block h-auto w-full opacity-95 transition-opacity duration-300 hover:opacity-100"
+                  src={item.image_url}
+                />
+              </button>
             ) : (
-              <div className="w-full h-full flex items-center justify-center text-error/60 text-xs uppercase px-6 text-center">
+              <div className="flex min-h-64 w-full items-center justify-center px-6 text-center text-xs uppercase text-error/60">
                 {item.error || t('history_failed')}
               </div>
             )}
 
-            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-100 flex flex-col justify-end p-5">
-               <div className="flex justify-between items-center mb-4 translate-y-8 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
-                  <div className="flex items-center gap-2">
-                    <button
-                      className="w-8 h-8 rounded-none border border-white/20 bg-white/5 flex items-center justify-center text-white hover:text-primary hover:border-primary transition-all backdrop-blur-md"
-                      type="button"
-                      title={t('history_preview')}
-                      onClick={() => setPreviewItem(item)}
-                    >
-                      <Maximize2 size={14} />
-                    </button>
-                    <a href={item.image_url || '#'} download className="w-8 h-8 rounded-none border border-white/20 bg-white/5 flex items-center justify-center text-white hover:text-primary hover:border-primary transition-all backdrop-blur-md" title={t('history_download')}>
-                      <Download size={14} />
-                    </a>
-                  </div>
-                  <button onClick={() => handleDelete(item.id)} className="w-8 h-8 rounded-none border border-error/20 bg-error/5 flex items-center justify-center text-error hover:bg-error/20 transition-all backdrop-blur-md" title={t('history_delete')}>
-                    <Trash2 size={14} />
-                  </button>
-               </div>
-
-               <div>
-                  <p className={`text-sm text-on-surface line-clamp-2 mb-2 ${colors.textId} transition-colors min-h-[40px]`}>
-                    {item.prompt}
-                  </p>
-                  <div className="flex items-center gap-3 text-white/40 text-[10px] uppercase tracking-wider mt-2 mb-4 font-bold">
-                    <span>{formatDate(item.created_at)}</span>
-                    <span className="w-1 h-1 rounded-full bg-white/20"></span>
-                    <span>{item.size}</span>
-                  </div>
-               </div>
-
-               <button
-                 onClick={() => handleRegenerate(item)}
-                 className={`pointer-events-none w-full translate-y-6 py-3 opacity-0 ${colors.btnBg} ${colors.btnText} font-black text-xs uppercase flex items-center justify-center gap-2 ${colors.btnShadow} transition-all duration-300 hover:bg-white hover:border-white shadow-white/50 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100`}
-               >
-                 <RefreshCw size={14} />
-                 {t('history_regenerate')}
-               </button>
+            <div className="border-t border-white/10 bg-surface-container-low/80 p-4">
+              <div className="mb-3 flex flex-wrap items-center gap-3 text-[10px] uppercase tracking-wider text-white/40">
+                <span className={colors.textId}>ID:{item.id.slice(0, 4).toUpperCase()}</span>
+                <span>{formatDate(item.created_at)}</span>
+                <span>{item.size}</span>
+              </div>
+              <p className={`mb-3 line-clamp-3 text-sm ${colors.textId} transition-colors`}>
+                {item.prompt}
+              </p>
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-[44px_44px_44px_1fr]">
+                <button
+                  className="flex h-10 items-center justify-center border border-white/20 bg-white/5 text-white transition-all hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-35"
+                  type="button"
+                  title={t('history_preview')}
+                  onClick={() => setPreviewItem(item)}
+                  disabled={!item.image_url}
+                >
+                  <Maximize2 size={14} />
+                </button>
+                <a
+                  href={item.image_url || '#'}
+                  download
+                  className={`flex h-10 items-center justify-center border border-white/20 bg-white/5 text-white transition-all hover:border-primary hover:text-primary ${item.image_url ? '' : 'pointer-events-none opacity-35'}`}
+                  title={t('history_download')}
+                >
+                  <Download size={14} />
+                </a>
+                <button
+                  onClick={() => handleDelete(item.id)}
+                  className="flex h-10 items-center justify-center border border-error/20 bg-error/5 text-error transition-all hover:bg-error/20"
+                  title={t('history_delete')}
+                  type="button"
+                >
+                  <Trash2 size={14} />
+                </button>
+                <button
+                  onClick={() => handleRegenerate(item)}
+                  className={`col-span-3 flex h-10 min-w-0 items-center justify-center gap-2 px-3 text-xs font-black uppercase sm:col-span-1 ${colors.btnBg} ${colors.btnText} ${colors.btnShadow} shadow-white/40 transition-all duration-300 hover:bg-white hover:border-white`}
+                  type="button"
+                >
+                  <RefreshCw size={14} />
+                  {t('history_regenerate')}
+                </button>
+              </div>
             </div>
           </div>
           );
-        })}
-      </div>
+        }}
+      />
 
       <div className="mt-12 flex justify-center">
         <button

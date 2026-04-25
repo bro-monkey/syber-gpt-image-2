@@ -131,7 +131,7 @@ export default function TaskDrawer() {
                       <div className="flex gap-3">
                         <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden border border-white/10 bg-black/40">
                           {previewImage ? (
-                            <img alt={task.prompt} className="h-full w-full object-cover" src={previewImage} />
+                            <img alt={task.prompt} className="h-full w-full object-contain" src={previewImage} />
                           ) : (
                             <ImageIcon size={18} className="text-white/25" />
                           )}

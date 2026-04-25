@@ -3,6 +3,7 @@ import { ImagePlus, Grid, List, Maximize2, RefreshCw, Loader2, X } from 'lucide-
 import { editImage, generateImage, getHistory, getInspirations, getInspirationStats, HistoryItem, InspirationItem } from '../api';
 import { useAuth } from '../auth';
 import ImagePreviewModal from '../components/ImagePreviewModal';
+import MasonryGrid from '../components/MasonryGrid';
 import { useSite } from '../site';
 import { useTasks } from '../tasks';
 
@@ -201,62 +202,57 @@ export default function Home() {
         </div>
       ) : visibleFeed.length > 0 ? (
         <>
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {visibleFeed.map((item, index) => (
-              <div
-                key={`${item.id}-${index}`}
-                className="relative group aspect-[3/4] border border-primary/30 overflow-hidden bg-black flex flex-col cursor-zoom-in"
-                role="button"
-                tabIndex={0}
-                onClick={() => setPreviewItem({ imageUrl: item.img, prompt: item.prompt })}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    setPreviewItem({ imageUrl: item.img, prompt: item.prompt });
-                  }
-                }}
-              >
-                <img
-                  alt={item.id}
-                  className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-all duration-500"
-                  loading="lazy"
-                  src={item.img}
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent"></div>
-
+          <MasonryGrid
+            items={visibleFeed}
+            getKey={(item, index) => `${item.id}-${index}`}
+            renderItem={(item) => (
+              <div className="overflow-hidden border border-primary/30 bg-black">
                 <button
-                  className="absolute left-4 top-4 z-10 flex h-10 w-10 items-center justify-center border border-white/10 bg-black/45 text-white/70 opacity-0 backdrop-blur-sm transition-all duration-300 hover:border-primary hover:text-primary group-hover:opacity-100"
+                  className="block w-full cursor-zoom-in bg-black text-left"
                   type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setPreviewItem({ imageUrl: item.img, prompt: item.prompt });
-                  }}
-                  title={t('history_preview')}
+                  onClick={() => setPreviewItem({ imageUrl: item.img, prompt: item.prompt })}
                 >
-                  <Maximize2 size={15} />
+                  <img
+                    alt={item.id}
+                    className="block h-auto w-full opacity-95 transition-opacity duration-300 hover:opacity-100"
+                    loading="lazy"
+                    src={item.img}
+                  />
                 </button>
-
-                <div className="absolute top-4 right-4 z-10 font-code-data text-white/50 text-[10px] border border-white/20 px-2 py-1 bg-black/50 backdrop-blur-sm shadow-[0_0_10px_rgba(0,0,0,0.5)]">
-                  {item.id}
-                </div>
-
-                <div className="absolute bottom-0 left-0 right-0 p-4 transform translate-y-8 group-hover:translate-y-0 transition-transform flex flex-col gap-3 backdrop-blur-sm bg-gradient-to-t from-black/90 to-transparent">
-                  {'title' in item && item.title && <div className="text-[10px] text-secondary uppercase tracking-widest line-clamp-1">{item.title}</div>}
-                  <p className="font-body-md text-white mb-2 line-clamp-3 text-sm">{item.prompt}</p>
+                <div className="border-t border-primary/15 bg-surface-container-low/80 p-4">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    {'title' in item && item.title ? (
+                      <div className="min-w-0 truncate text-[10px] uppercase tracking-widest text-secondary">{item.title}</div>
+                    ) : (
+                      <div className="min-w-0 truncate font-code-data text-[10px] text-white/35">{item.id}</div>
+                    )}
+                    <div className="shrink-0 font-code-data text-[10px] text-white/25">{item.id}</div>
+                  </div>
+                  <p className="mb-3 line-clamp-3 text-sm text-white/80">{item.prompt}</p>
+                  <div className="grid grid-cols-[44px_1fr] gap-2">
+                    <button
+                      className="flex h-10 items-center justify-center border border-white/10 bg-white/5 text-white/70 transition-all duration-300 hover:border-primary hover:text-primary"
+                      type="button"
+                      onClick={() => setPreviewItem({ imageUrl: item.img, prompt: item.prompt })}
+                      title={t('history_preview')}
+                    >
+                      <Maximize2 size={15} />
+                    </button>
                   <button
                     onClick={(event) => {
                       event.stopPropagation();
                       setPromptValue(item.prompt);
                     }}
-                    className="pointer-events-none w-full translate-y-3 py-2 opacity-0 bg-primary text-black font-black text-xs uppercase shadow-[0_0_10px_rgba(0,243,255,0.5)] flex items-center justify-center gap-2 hover:bg-white hover:shadow-white/50 transition-all duration-300 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100"
+                    className="flex h-10 items-center justify-center gap-2 bg-primary px-3 text-xs font-black uppercase text-black shadow-[0_0_10px_rgba(0,243,255,0.35)] transition-all duration-300 hover:bg-white hover:shadow-white/40"
                   >
                     <RefreshCw size={14} />
                     {t('home_clone_prompt')}
                   </button>
+                  </div>
                 </div>
               </div>
-            ))}
-          </div>
+            )}
+          />
           <div className="flex flex-col items-center gap-4 py-8">
             {loadingMoreFeed ? (
               <div className="flex items-center justify-center gap-3 text-xs uppercase tracking-[0.3em] text-primary/70">
