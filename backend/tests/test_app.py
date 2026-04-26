@@ -5,9 +5,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi.testclient import TestClient
 
-from app.inspirations import normalize_inspiration_source_url, parse_inspiration_markdown
+from app.inspirations import cache_inspiration_images, normalize_inspiration_source_url, parse_inspiration_markdown
 from app.main import create_app, _auth_client, _db, _provider, _settings
 from app.settings import Settings
 
@@ -416,6 +417,28 @@ def test_normalize_github_inspiration_source_url() -> None:
         )
         == "https://raw.githubusercontent.com/YouMind-OpenLab/awesome-gpt-image-2/main/README_zh.md"
     )
+
+
+def test_cache_inspiration_images_to_local_storage(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    settings = app.state.settings
+    items = [{"image_url": "https://cdn.example.com/case.png", "raw": {}}]
+
+    async def run_cache() -> dict[str, Any]:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert str(request.url) == "https://cdn.example.com/case.png"
+            return httpx.Response(200, headers={"content-type": "image/png"}, content=b"png-data")
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await cache_inspiration_images(settings, client, items)
+
+    result = asyncio.run(run_cache())
+
+    assert result["cached"] == 1
+    assert items[0]["image_url"].startswith("/storage/inspirations/")
+    assert items[0]["raw"]["original_image_url"] == "https://cdn.example.com/case.png"
+    cached_path = settings.storage_dir / items[0]["image_url"].removeprefix("/storage/")
+    assert cached_path.read_bytes() == b"png-data"
 
 
 def test_manual_inspiration_sync_endpoint(tmp_path: Path) -> None:

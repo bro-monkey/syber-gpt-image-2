@@ -103,7 +103,12 @@ class Settings:
     def uploads_dir(self) -> Path:
         return self.storage_dir / "uploads"
 
+    @property
+    def inspirations_dir(self) -> Path:
+        return self.storage_dir / "inspirations"
+
     def ensure_directories(self) -> None:
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.images_dir.mkdir(parents=True, exist_ok=True)
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
+        self.inspirations_dir.mkdir(parents=True, exist_ok=True)

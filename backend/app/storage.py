@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
@@ -52,6 +54,38 @@ async def save_provider_image(settings: Settings, history_id: str, item: dict[st
     raise ValueError("Provider response did not contain b64_json or url")
 
 
+async def cache_remote_image(settings: Settings, image_url: str, client: httpx.AsyncClient) -> dict[str, str] | None:
+    parsed = urlparse(image_url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+
+    settings.inspirations_dir.mkdir(parents=True, exist_ok=True)
+    image_hash = hashlib.sha256(image_url.encode("utf-8")).hexdigest()[:32]
+    for suffix in (".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif"):
+        path = settings.inspirations_dir / f"{image_hash}{suffix}"
+        if path.exists() and path.stat().st_size > 0:
+            return {"path": str(path), "url": f"/storage/inspirations/{path.name}", "source_url": image_url}
+
+    response = await client.get(
+        image_url,
+        headers={
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "User-Agent": "joko-image/1.0",
+        },
+    )
+    response.raise_for_status()
+    content_type = response.headers.get("content-type")
+    normalized_type = content_type.split(";", 1)[0].strip().lower() if content_type else ""
+    if normalized_type and not normalized_type.startswith("image/"):
+        raise ValueError(f"Remote resource is not an image: {normalized_type}")
+
+    extension = _suffix_from_content_type(content_type) or _suffix_from_name(image_url, ".jpg")
+    filename = f"{image_hash}{extension}"
+    path = settings.inspirations_dir / filename
+    path.write_bytes(response.content)
+    return {"path": str(path), "url": f"/storage/inspirations/{filename}", "source_url": image_url}
+
+
 def _decode_base64_payload(value: str) -> tuple[str, bytes]:
     stripped = value.strip()
     match = DATA_URL_RE.match(stripped)
@@ -73,6 +107,8 @@ def _suffix_from_content_type(content_type: str | None) -> str | None:
         "image/jpeg": ".jpg",
         "image/jpg": ".jpg",
         "image/webp": ".webp",
+        "image/avif": ".avif",
+        "image/gif": ".gif",
     }.get(normalized)
 
 
@@ -80,4 +116,4 @@ def _suffix_from_name(name: str | None, default: str) -> str:
     if not name:
         return default
     suffix = Path(name.split("?", 1)[0]).suffix.lower()
-    return suffix if suffix in {".png", ".jpg", ".jpeg", ".webp"} else default
+    return suffix if suffix in {".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif"} else default

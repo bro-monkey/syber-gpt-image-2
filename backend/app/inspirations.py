@@ -11,6 +11,7 @@ from fastapi import FastAPI
 
 from .db import Database
 from .settings import Settings
+from .storage import cache_remote_image
 
 
 HEADING_RE = re.compile(r"^###\s+(?:Case|No\.)\s+([^:]+):\s+(.+)$")
@@ -24,6 +25,7 @@ LINK_RE = re.compile(r"^\[([^\]]+)\]\(([^)]+)\)")
 AUTHOR_RE = re.compile(r"\(by\s+\[@?([^\]]+)\]\(([^)]+)\)\)")
 DETAIL_AUTHOR_RE = re.compile(r"-\s+\*\*Author:\*\*\s+(?:\[([^\]]+)\]\(([^)]+)\)|(.+))")
 DETAIL_SOURCE_RE = re.compile(r"-\s+\*\*Source:\*\*\s+\[([^\]]+)\]\(([^)]+)\)")
+IMAGE_CACHE_CONCURRENCY = 8
 
 
 def normalize_inspiration_source_url(value: str) -> str:
@@ -117,20 +119,33 @@ async def sync_inspirations(settings: Settings, db: Database, source_urls: list[
 
     parsed_total = 0
     changed_total = 0
+    cached_total = 0
     synced_at = None
     source_results: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
+    image_cache_errors: list[dict[str, str]] = []
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
         for source_url in urls:
             try:
                 response = await client.get(source_url)
                 response.raise_for_status()
                 items = parse_inspiration_markdown(response.text, source_url)
+                cache_result = await cache_inspiration_images(settings, client, items)
                 result = db.upsert_inspirations(source_url, items)
                 parsed_total += len(items)
                 changed_total += int(result.get("count") or 0)
+                cached_total += int(cache_result.get("cached") or 0)
+                image_cache_errors.extend(cache_result.get("errors") or [])
                 synced_at = result.get("synced_at") or synced_at
-                source_results.append({"source_url": source_url, "parsed": len(items), **result})
+                source_results.append(
+                    {
+                        "source_url": source_url,
+                        "parsed": len(items),
+                        "cached_images": cache_result.get("cached", 0),
+                        "image_cache_errors": cache_result.get("errors", []),
+                        **result,
+                    }
+                )
             except Exception as exc:
                 errors.append({"source_url": source_url, "error": str(exc)})
     if errors and not source_results:
@@ -141,10 +156,42 @@ async def sync_inspirations(settings: Settings, db: Database, source_urls: list[
         "source_urls": urls,
         "parsed": parsed_total,
         "count": changed_total,
+        "cached_images": cached_total,
         "synced_at": synced_at,
         "sources": source_results,
         "errors": errors,
+        "image_cache_errors": image_cache_errors,
     }
+
+
+async def cache_inspiration_images(
+    settings: Settings,
+    client: httpx.AsyncClient,
+    items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    semaphore = asyncio.Semaphore(IMAGE_CACHE_CONCURRENCY)
+
+    async def cache_item(item: dict[str, Any]) -> dict[str, Any]:
+        image_url = item.get("image_url")
+        if not isinstance(image_url, str) or not image_url.startswith(("http://", "https://")):
+            return {"cached": False}
+        async with semaphore:
+            try:
+                cached = await cache_remote_image(settings, image_url, client)
+            except Exception as exc:
+                raw = item.get("raw") if isinstance(item.get("raw"), dict) else {}
+                item["raw"] = {**raw, "original_image_url": image_url, "image_cache_error": str(exc)}
+                return {"cached": False, "url": image_url, "error": str(exc)}
+            if not cached:
+                return {"cached": False}
+            raw = item.get("raw") if isinstance(item.get("raw"), dict) else {}
+            item["raw"] = {**raw, "original_image_url": image_url}
+            item["image_url"] = cached["url"]
+            return {"cached": True, "url": image_url, "local_url": cached["url"]}
+
+    results = await asyncio.gather(*(cache_item(item) for item in items))
+    errors = [{"url": result["url"], "error": result["error"]} for result in results if result.get("error")]
+    return {"cached": sum(1 for result in results if result.get("cached")), "errors": errors}
 
 
 async def run_inspiration_sync_loop(app: FastAPI) -> None:

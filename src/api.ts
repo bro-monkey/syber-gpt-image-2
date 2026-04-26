@@ -318,7 +318,15 @@ export function getInspirationStats() {
 }
 
 export function syncInspirations() {
-  return request<{ ok: boolean; parsed: number; count: number; synced_at: string; source_urls: string[] }>('/api/inspirations/sync', {
+  return request<{
+    ok: boolean;
+    parsed: number;
+    count: number;
+    cached_images: number;
+    synced_at: string;
+    source_urls: string[];
+    image_cache_errors: { url: string; error: string }[];
+  }>('/api/inspirations/sync', {
     method: 'POST',
   });
 }
