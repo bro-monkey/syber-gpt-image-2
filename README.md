@@ -418,7 +418,7 @@ docker compose build
 - 作者 / 站主：Joko
 - QQ：935764227
 - Telegram：https://t.me/jokoacoount
-- 交流群：1076496247
+- 交流群：1076496247 (私我领免费生图额度
 - 演示站 ：https://image.get-money.locker
 
 ## 开源协议
